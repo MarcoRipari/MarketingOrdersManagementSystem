@@ -136,7 +136,6 @@ else:
             WHERE r.ordine_id = :ordine_id
             ORDER BY p.posizione ASC;
         """
-        # CORREZIONE: Aggiunto params={"ordine_id": id_ordine_attivo}
         df_righe_picking = conn.query(query_righe, params={"ordine_id": id_ordine_attivo}, ttl="0")
     except Exception as e:
         st.error(f"Errore nel caricamento delle righe d'ordine: {e}")
@@ -160,75 +159,77 @@ else:
             if gia_prelevato:
                 # Riga Evasa: Visualizzazione contratta/pulita per non intasare lo schermo mobile
                 st.write(f"🟢 **[{riga['posizione']}]** — {riga['descrizione']}")
-                st.success(f"Confermato: **{riga['quantita_prelevata']}** su {riga['quantita_richiesta']} pz.")
+                st.success(f"Confermato: **{int(riga['quantita_prelevata'] if riga['quantita_prelevata'] > 0 else riga['quantita_richiesta'])}** su {int(riga['quantita_richiesta'])} pz.")
             else:
                 # Riga da Evare: Evidenziazione forte dell'ubicazione fisica a scaffale
                 st.error(f"📍 UBICAZIONE: {riga['posizione']}")
                 st.write(f"**Articolo:** {riga['descrizione']} ({riga['brand'] if riga['brand'] else 'Generico'})")
-                st.write(f"📋 Q.tà Richiesta: **{riga['quantita_richiesta']}** pezzi")
+                st.write(f"📋 Q.tà Richiesta: **{int(riga['quantita_richiesta'])}** pezzi")
                 st.code(f"Barcode atteso: {riga['barcode']}", language="markdown")
                 
-                # --- VALIDAZIONE BARCODE COMPATIBILE SCANNER HID (§6.4 PRD) ---
+                # --- FUNZIONE DI AUTO-SUBMIT AL CAMBIO DEL TESTO (OTTIMIZZAZIONE VELOCITÀ) ---
+                # Questa funzione viene attivata IMMEDIATAMENTE quando la tastiera inserisce il codice e preme Invio
+                def esegui_auto_picking(id_riga=r_id, id_prod=riga['prodotto_id'], bc_atteso=riga['barcode'], q_richiesta=riga['quantita_richiesta'], pos=riga['posizione']):
+                    input_utente = st.session_state[f"scan_{id_riga}"].strip()
+                    
+                    if input_utente == bc_atteso.strip():
+                        try:
+                            # Se l'operatore ha modificato manualmente la quantità nel campo numerico prima di sparare, usiamo quella.
+                            # Altrimenti, di default, consideriamo l'intero lotto richiesto prelevato con successo.
+                            qty_effettiva = st.session_state.get(f"qty_p_{id_riga}", int(q_richiesta))
+                            
+                            with conn.session as session:
+                                # 1. Aggiorna la riga dell'ordine
+                                session.execute(
+                                    text("UPDATE ordini_righe SET quantita_prelevata = :q WHERE id = :id;"),
+                                    params={"q": qty_effettiva, "id": id_riga}
+                                )
+                                # 2. Decrementa lo stock
+                                session.execute(
+                                    text("UPDATE prodotti SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) WHERE id = :id;"),
+                                    params={"q": qty_effettiva, "id": id_prod}
+                                )
+                                session.commit()
+                            
+                            st.session_state.righe_confermate_sessione.add(id_riga)
+                            st.toast(f"🎯 UBICAZIONE {pos} EVASA CON SUCCESSO!", icon="✅")
+                        except Exception as e:
+                            st.error(f"Errore nel salvataggio automatico: {e}")
+                    elif input_utente != "":
+                        st.toast(f"❌ Barcode Errato per l'ubicazione {pos}!", icon="🚨")
+
+                # Input Barcode con callback ad attivazione immediata
                 bc_input = st.text_input(
                     "Scansiona Barcode per Sbloccare", 
                     key=f"scan_{r_id}", 
-                    placeholder="Inquadra o digita il codice...",
-                    help="Usa il lettore barcode o digita il codice esatto per sbloccare i pulsanti di quantità."
+                    placeholder="Spara il codice qui...",
+                    on_change=esegui_auto_picking,
+                    help="Usa la tastiera-fotocamera. Se il codice è corretto, la riga si salva da sola!"
                 )
                 
-                # Validazione formale della stringa
+                # Validazione formale visiva (se l'operatore scrive senza premere subito invio)
                 barcode_valido = (bc_input.strip() == riga['barcode'].strip())
                 
                 if bc_input and not barcode_valido:
                     st.error("❌ Barcode errato! Controlla di aver preso l'articolo corretto.")
-                elif barcode_valido:
-                    st.success("✅ Barcode Corrispondente! Seleziona i pezzi trovati.")
                 
-                # Input quantità: sbloccato SOLO se il barcode è corretto
+                # Input quantità: visibile come opzione/fallback o per gestire le anomalie (es. giacenza parziale)
                 qty_prelevata = st.number_input(
                     "Quantità effettiva trovata a scaffale",
                     min_value=0,
                     max_value=int(riga['quantita_richiesta']),
                     value=int(riga['quantita_richiesta']),
                     step=1,
-                    key=f"qty_p_{r_id}",
-                    disabled=not barcode_valido
+                    key=f"qty_p_{r_id}"
                 )
                 
-                # Gestione dell'eccezione di giacenza insufficiente (§5.1 PRD)
                 if barcode_valido and qty_prelevata < riga['quantita_richiesta']:
                     st.warning("⚠️ Nota: Stai dichiarando un prelievo parziale. La quantità mancante verrà annullata definitivamente.")
 
-                # --- SALVATAGGIO TRANSAZIONALE RIGA (§5.4 PRD) ---
-                if st.button("💾 Conferma Riga", key=f"btn_save_{r_id}", disabled=not barcode_valido, type="primary", use_container_width=True):
-                    try:
-                        with conn.session as session:
-                            # 1. Aggiorna la riga dell'ordine con la quantità prelevata
-                            session.execute(
-                                text("""
-                                    UPDATE ordini_righe 
-                                    SET quantita_prelevata = :q 
-                                    WHERE id = :id;
-                                """),
-                                params={"q": qty_prelevata, "id": r_id}
-                            )
-                            # 2. Decrementa la giacenza dell'anagrafica prodotti (senza mai andare sotto zero)
-                            session.execute(
-                                text("""
-                                    UPDATE prodotti 
-                                    SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) 
-                                    WHERE id = :id;
-                                """),
-                                params={"q": qty_prelevata, "id": riga['prodotto_id']}
-                            )
-                            session.commit()
-                        
-                        st.session_state.righe_confermate_sessione.add(r_id)
-                        st.toast(f"Ubicazione {riga['posizione']} elaborata con successo!")
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Errore transazionale durante il salvataggio della riga: {e}")
+                # Il bottone manuale resta come paracadute di sicurezza se l'operatore non usa l'invio automatico
+                if st.button("💾 Conferma Riga Manuale", key=f"btn_save_{r_id}", disabled=not barcode_valido, type="secondary", use_container_width=True):
+                    esegui_auto_picking()
+                    st.rerun()
 
     # ====================================================
     # FASE 3: CHIUSURA DEFINITIVA DEL PICKING

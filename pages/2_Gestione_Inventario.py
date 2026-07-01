@@ -25,7 +25,7 @@ ruolo_utente = st.sidebar.radio(
 try:
     df_prodotti = conn.query("SELECT * FROM vista_prodotti_riepilogo;", ttl="0")
     
-    # PERFEZIONAMENTO: Ordinamento alfabetico predefinito per Brand e Descrizione
+    # CORREZIONE: Ordinamento alfabetico predefinito per Brand e Descrizione
     if not df_prodotti.empty:
         df_prodotti = df_prodotti.sort_values(by=["brand", "descrizione"], ascending=[True, True]).reset_index(drop=True)
         
@@ -59,7 +59,7 @@ if stagione_selezionata != "Tutte":
 df_sotto_scorta = df_filtrato[df_filtrato["sotto_scorta"] == True]
 
 if not df_sotto_scorta.empty:
-    st.error(f"⚠️ Attenzione: Ci sono {len(df_sotto_scorta)} articoli in esaurimento (Sotto Scorta)!")
+    st.error(f"⚠️ Attenzione: Ci sono {len(df_sotto_scorta)} articles in esaurimento (Sotto Scorta)!")
     # Mostriamo un mini-tabellone espandibile con gli elementi critici
     with st.expander("Visualizza articoli sotto scorta", expanded=True):
         st.dataframe(
@@ -82,7 +82,7 @@ def colora_sotto_scorta(row):
 
 if not df_filtrato.empty:
     # Mostriamo la tabella applicando lo stile di formattazione condizionale
-    # PERFEZIONAMENTO UI: Aggiunto 'column_config' per formattare l'anno e i numeri senza decimali/virgole intermedie
+    # CORREZIONE UI: Aggiunto column_config per formattare l'anno senza virgole (es. 2026 e non 2,026)
     st.dataframe(
         df_filtrato.style.apply(colora_sotto_scorta, axis=1),
         column_order=["barcode", "descrizione", "brand", "stagione_riferimento", "anno_riferimento", "posizione", "quantita_disponibile", "scorta_minima", "totale_spedito_storico"],
@@ -119,8 +119,8 @@ if ruolo_utente == "Operatore (Magazzino)":
                 new_brand = st.text_input("Brand (Opzionale)")
             with col2:
                 new_stagione = st.selectbox("Stagione (Opzionale)", [None, "SS", "FW"])
-                # PERFEZIONAMENTO: Rimosso "(Opzionale)" e contrassegnato come obbligatorio (*)
-                new_anno = st.number_input("Anno *", min_value=2020, max_value=2035, value=2026, step=1)
+                # CORREZIONE: value=None permette al campo numerico di essere svuotato/lasciato in bianco
+                new_anno = st.number_input("Anno (Opzionale)", min_value=2020, max_value=2035, value=None, step=1)
                 new_pos = st.text_input("Posizione a Scaffale (es. A-01-B) *")
             
             col3, col4 = st.columns(2)
@@ -132,25 +132,25 @@ if ruolo_utente == "Operatore (Magazzino)":
             submit_new = st.form_submit_button("Salva Prodotto in Anagrafica")
             
             if submit_new:
-                # PERFEZIONAMENTO: Aggiunto controllo di validazione stringente anche su 'new_anno'
-                if not new_barcode or not new_desc or not new_pos or not new_anno:
-                    st.error("I campi Barcode, Descrizione, Anno e Posizione sono obbligatori.")
+                # CORREZIONE: L'anno NON è tra i campi obbligatori qui
+                if not new_barcode or not new_desc or not new_pos:
+                    st.error("I campi Barcode, Descrizione e Posizione sono obbligatori.")
                 else:
                     try:
                         with conn.session as session:
-                            # CORREZIONE BUG SQL: Sostituito l'errato "UPDATE ... VALUES" con un "INSERT INTO" valido
-                            # e applicato il costrutto text() richiesto dalle specifiche SQLAlchemy
+                            # CORREZIONE BUG: Sintassi SQL corretta in INSERT INTO con i nomi reali delle tue colonne
                             session.execute(
                                 text("""
-                                INSERT INTO prodotti (barcode, descrizione, brand, formazione_stagione, anno, posizione, quantita_disponibile, scorta_minima, data_creazione, data_aggiornamento)
-                                VALUES (:barcode, :desc, :brand, :stagione, :anno, :posizione, :qty, :scorta, NOW(), NOW());
+                                INSERT INTO prodotti (barcode, descrizione, brand, stagione_riferimento, anno_riferimento, posizione, quantita_disponibile, scorta_minima)
+                                VALUES (:barcode, :desc, :brand, :stagione, :anno, :posizione, :qty, :scorta);
                                 """),
                                 params={
                                     "barcode": new_barcode.strip(), 
                                     "desc": new_desc.strip(), 
                                     "brand": new_brand.strip() if new_brand.strip() else None,
                                     "stagione": new_stagione, 
-                                    "anno": int(new_anno), # CORREZIONE: rimosso l'istruzione condizionale errata
+                                    # CORREZIONE: Se l'utente non scrive l'anno, viene passato None (NULL nel DB) senza crash
+                                    "anno": int(new_anno) if new_anno is not None else None, 
                                     "posizione": new_pos.strip().upper(), 
                                     "qty": new_qty, 
                                     "scorta": new_min
@@ -191,7 +191,7 @@ if ruolo_utente == "Operatore (Magazzino)":
                             session.execute(
                                 text("""
                                 UPDATE prodotti 
-                                SET posizione = :pos, quantita_disponibile = :qty, scorta_minima = :min, data_aggiornamento = NOW()
+                                SET posizione = :pos, quantita_disponibile = :qty, scorta_minima = :min
                                 WHERE id = :id;
                                 """),
                                 params={"pos": edit_pos.strip().upper(), "qty": edit_qty, "min": edit_min, "id": prodotto_scelto}

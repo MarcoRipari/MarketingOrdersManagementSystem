@@ -307,6 +307,7 @@ with tab_modifica:
                 for _, riga in df_righe_target.iterrows():
                     col_b, col_d, col_q, col_del = st.columns([2, 4, 2, 1])
                     col_b.write(f"`{riga['barcode']}`")
+                    col_c.write(riga['brand'])
                     col_d.write(riga['descrizione'])
                     
                     max_consentito = int(riga['quantita_disponibile'] + riga['quantita_richiesta'])
@@ -328,11 +329,12 @@ with tab_modifica:
                 # AGGIUNTA ARTICOLO EXTRA
                 st.divider()
                 st.write("➕ **Aggiungi un nuovo articolo a questo ordine:**")
-                
+
+                df_prodotti_filtrati = df_prodotti_filtrati.sort(by=['brand'])
                 opzioni_nuovo_p = {"-- Seleziona un articolo da aggiungere (Opzionale) --": None}
                 if not df_prodotti_filtrati.empty:
                     for _, row in df_prodotti_filtrati.iterrows():
-                        opzioni_nuovo_p[f"[{row['barcode']}] {row['descrizione']} (Disponibili: {row['quantita_disponibile']} in {row['posizione']})"] = row
+                        opzioni_nuovo_p[f"{row['brand']} - {row['descrizione']} (Disponibili: {row['quantita_disponibile']})"] = row
                 
                 col_np, col_nq = st.columns([6, 3])
                 nuovo_p_testo = col_np.selectbox("Scegli l'articolo extra", list(opzioni_nuovo_p.keys()), key=f"new_p_{id_ordine_target}")

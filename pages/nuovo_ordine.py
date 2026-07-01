@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from sqlalchemy import text  # 👈 Importato text per compatibilità SQLAlchemy 2.0
 
 st.set_page_config(page_title="SGLM - Nuovo Ordine Marketing", layout="wide")
 
@@ -15,7 +16,7 @@ tab_crea, tab_modifica = st.tabs(["➕ Crea Nuovo Ordine", "✏️ Modifica Ordi
 ## INIZIALIZZAZIONE SESSION STATE PER IL CARRELLO TEMPORANEO
 ## ----------------------------------------------------
 if "carrello" not in st.session_state:
-    st.session_state.carrello = []  # Lista di dizionari: {"prodotto_id": ..., "barcode": ..., "descrizione": ..., "quantita": ...}
+    st.session_state.carrello = []  # Lista di dizionari
 
 ## ----------------------------------------------------
 ## TAB 1: CREAZIONE NUOVO ORDINE
@@ -23,14 +24,12 @@ if "carrello" not in st.session_state:
 with tab_crea:
     st.subheader("Fase 1 — Selezione o Creazione Cliente")
     
-    # Ricarica l'anagrafica clienti dal DB
     try:
         df_clienti = conn.query("SELECT id, nome, indirizzo, citta FROM clienti ORDER BY nome;", ttl="0")
     except Exception as e:
         st.error("Errore nel caricamento dell'anagrafica clienti.")
         st.stop()
         
-    # Opzioni di selezione cliente
     opzioni_cliente = {"-- Seleziona un cliente esistente --": None}
     for _, row in df_clienti.iterrows():
         opzioni_cliente[f"{row['nome']} ({row['citta']} - {row['indirizzo']})"] = row['id']
@@ -38,7 +37,6 @@ with tab_crea:
     cliente_scelto = st.selectbox("Seleziona il Destinatario della spedizione", list(opzioni_cliente.keys()))
     cliente_id = opzioni_cliente[cliente_scelto]
     
-    # Espandibile per inserire un nuovo cliente al volo se non presente
     with st.expander("➕ Il cliente non esiste? Crealo ora al volo"):
         with st.form("form_rapido_cliente", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -60,10 +58,10 @@ with tab_crea:
                     try:
                         with conn.session as session:
                             session.execute(
-                                """
+                                text("""
                                 INSERT INTO clienti (nome, indirizzo, citta, cap, nazione, email, note)
                                 VALUES (:nome, :ind, :citta, :cap, :naz, :email, :note);
-                                """,
+                                """),
                                 params={"nome": c_nome, "ind": c_ind, "citta": c_citta, "cap": c_cap, "naz": c_naz, "email": c_mail if c_mail else None, "note": c_note if c_note else None}
                             )
                             session.commit()
@@ -75,7 +73,6 @@ with tab_crea:
     st.divider()
     st.subheader("Fase 2 — Composizione Carrello")
     
-    # Recupera i prodotti con stock in tempo reale
     try:
         df_prodotti = conn.query("SELECT id, barcode, descrizione, brand, quantita_disponibile, posizione FROM prodotti WHERE quantita_disponibile > 0 ORDER BY descrizione;", ttl="0")
     except Exception as e:
@@ -85,7 +82,6 @@ with tab_crea:
     if df_prodotti.empty:
         st.warning("Non ci sono prodotti con giacenza disponibile nel magazzino in questo momento.")
     else:
-        # Struttura layout per aggiungere righe al carrello
         col_p, col_q, col_b = st.columns([5, 2, 2])
         
         opzioni_prodotti = {}
@@ -98,7 +94,6 @@ with tab_crea:
         qty_richiesta = col_q.number_input("Quantità", min_value=1, max_value=int(prodotto_row['quantita_disponibile']), value=1, step=1)
         
         if col_b.button("🛒 Aggiungi Riga", use_container_width=True):
-            # Controlla se il prodotto è già presente nel carrello in session state per incrementarlo
             gia_presente = False
             for item in st.session_state.carrello:
                 if item["prodotto_id"] == prodotto_row["id"]:
@@ -114,19 +109,17 @@ with tab_crea:
             if not gia_presente:
                 st.session_state.carrello.append({
                     "prodotto_id": prodotto_row["id"],
-                    "barcode": prodotto_row["barcode"],  # 👈 Sostituito 'producto_row' con 'prodotto_row'
+                    "barcode": prodotto_row["barcode"],
                     "descrizione": prodotto_row["descrizione"],
                     "quantita": qty_richiesta
                 })
                 st.toast("Articolo aggiunto al carrello!")
                 st.rerun()
 
-    # Mostra il contenuto del carrello corrente
     if st.session_state.carrello:
         st.write("### Righe incluse nella richiesta corrente:")
         df_carrello = pd.DataFrame(st.session_state.carrello)
         
-        # Bottone per svuotare completamente il carrello
         if st.button("❌ Svuota interamente il carrello"):
             st.session_state.carrello = []
             st.rerun()
@@ -136,7 +129,7 @@ with tab_crea:
         st.divider()
         st.subheader("Fase 3 — Informazioni di Invio")
         richiedente_email = st.text_input("Tua Email Ufficio Marketing *", placeholder="nome.cognome@falc.biz")
-        note_ordine = st.text_area("Note aggiuntive per l'ordine (opzionali)", placeholder="Es. Consegnare tassativamente entro venerdì")
+        note_ordine = st.text_area("Note aggiuntive per l'ordine (opzionali)", placeholder="Es. Consegnare tassativamente")
         
         if st.button("🚀 Invia Ordine Definitivo al Magazzino", type="primary"):
             if not cliente_id:
@@ -146,30 +139,30 @@ with tab_crea:
             else:
                 try:
                     with conn.session as session:
-                        # 1. Inserisce la testata dell'ordine
+                        # 1. Inserisce la testata dell'ordine (con text())
                         res = session.execute(
-                            """
+                            text("""
                             INSERT INTO ordini_testata (cliente_id, richiedente_email, note, stato)
                             VALUES (:cliente_id, :email, :note, 'Nuovo')
                             RETURNING id;
-                            """,
+                            """),
                             params={"cliente_id": cliente_id, "email": richiedente_email, "note": note_ordine if note_ordine else None}
                         )
                         ordine_id_nuovo = res.fetchone()[0]
                         
-                        # 2. Inserisce tutte le righe associate
+                        # 2. Inserisce tutte le righe (con text())
                         for item in st.session_state.carrello:
                             session.execute(
-                                """
+                                text("""
                                 INSERT INTO ordini_righe (ordine_id, prodotto_id, quantita_richiesta)
                                 VALUES (:ordine_id, :prodotto_id, :qty);
-                                """,
+                                """),
                                 params={"ordine_id": ordine_id_nuovo, "prodotto_id": item["prodotto_id"], "qty": item["quantita"]}
                             )
                         session.commit()
                         
                     st.success("🎉 Ordine registrato con successo! Inviato al magazzino.")
-                    st.session_state.carrello = [] # Svuota il carrello a fine operazione
+                    st.session_state.carrello = []
                     st.rerun()
                 except Exception as e:
                     st.error(f"Errore transazionale nel salvataggio dell'ordine: {e}")
@@ -183,7 +176,6 @@ with tab_crea:
 with tab_modifica:
     st.subheader("Gestione e Modifica Richieste Pendenti")
     
-    # Recupera tutti gli ordini che sono ancora nello stato 'Nuovo'
     try:
         query_ordini = """
             SELECT t.id, t.numero_ordine, c.nome as cliente_nome, t.richiedente_email, t.data_creazione
@@ -198,17 +190,16 @@ with tab_modifica:
         st.stop()
         
     if df_ordini_nuovi.empty:
-        st.info("Non ci sono ordini in stato 'Nuovo' modificabili al momento. Tutti gli ordini inseriti sono già in lavorazione o spediti.")
+        st.info("Non ci sono ordini in stato 'Nuovo' modificabili al momento.")
     else:
         opzioni_ordini = {"-- Seleziona un ordine da modificare --": None}
         for _, row in df_ordini_nuovi.iterrows():
-            opzioni_ordini[f"Ordine N° {row['numero_ordine']} - Per: {row['cliente_nome']} (Inserito da: {row['richiedente_email']})"] = row['id']
+            opzioni_ordini[f"Ordine N° {row['numero_ordine']} - Per: {row['cliente_nome']}"] = row['id']
             
         ordine_selezionato_id = st.selectbox("Scegli l'ordine da visionare/modificare", list(opzioni_ordini.keys()))
         id_ordine_target = opzioni_ordini[ordine_selezionato_id]
         
         if id_ordine_target:
-            # Recupera le righe dell'ordine selezionato
             query_righe = """
                 SELECT r.id as riga_id, p.id as prodotto_id, p.barcode, p.descrizione, r.quantita_richiesta, p.quantita_disponibile
                 FROM ordini_righe r
@@ -219,7 +210,6 @@ with tab_modifica:
             
             st.write("#### Righe dell'ordine:")
             
-            # Form per consentire la cancellazione o la modifica delle quantità
             with st.form("form_modifica_ordine"):
                 cambiamenti = {}
                 cancellazioni = []
@@ -229,7 +219,6 @@ with tab_modifica:
                     col_b.write(f"`{riga['barcode']}`")
                     col_d.write(riga['descrizione'])
                     
-                    # Permette di cambiare la quantità richiesta entro i limiti fisici dello stock + la quantità già impegnata dall'ordine stesso
                     max_consentito = int(riga['quantita_disponibile'] + riga['quantita_richiesta'])
                     nuova_qty = col_q.number_input(
                         f"Q.tà (Max {max_consentito})",
@@ -246,19 +235,19 @@ with tab_modifica:
                     elif nuova_qty != riga['quantita_richiesta']:
                         cambiamenti[riga['riga_id']] = nuova_qty
                         
-                st.write("⚠️ *Nota: Se elimini tutte le righe, l'ordine rimarrà vuoto. Puoi anche richiedere al magazzino di annullarlo.*")
+                st.write("⚠️ *Nota: Se elimini tutte le righe, l'ordine rimarrà vuoto.*")
                 
                 btn_salva_modifiche = st.form_submit_button("Salva Modifiche Ordine", type="primary")
                 
                 if btn_salva_modifiche:
                     try:
                         with conn.session as session:
-                            # 1. Gestisci le cancellazioni di righe
+                            # 1. Cancellazioni (con text())
                             for riga_id in cancellazioni:
-                                session.execute("DELETE FROM ordini_righe WHERE id = :id", params={"id": riga_id})
-                            # 2. Gestisci gli aggiornamenti di quantità
+                                session.execute(text("DELETE FROM ordini_righe WHERE id = :id"), params={"id": riga_id})
+                            # 2. Aggiornamenti (con text())
                             for riga_id, qta in cambiamenti.items():
-                                session.execute("UPDATE ordini_righe SET quantita_richiesta = :qta WHERE id = :id", params={"qta": qta, "id": riga_id})
+                                session.execute(text("UPDATE ordini_righe SET quantita_richiesta = :qta WHERE id = :id"), params={"qta": qta, "id": riga_id})
                             session.commit()
                         st.success("Ordine aggiornato con successo!")
                         st.rerun()

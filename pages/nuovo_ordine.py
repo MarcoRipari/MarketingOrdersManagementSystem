@@ -10,10 +10,16 @@ conn = st.connection("postgresql", type="sql")
 st.title("🛒 Modulo B — Gestione Richieste e Ordini")
 
 # ----------------------------------------------------
-# CARICAMENTO ANAGRAFICA CLIENTI (Globale per entrambi i Tab)
+# CARICAMENTO ANAGRAFICA CLIENTI (Globale con i nuovi codici)
 # ----------------------------------------------------
 try:
-    df_clienti = conn.query("SELECT id, nome, indirizzo, citta FROM clienti ORDER BY nome;", ttl="0")
+    df_clienti = conn.query("""
+        SELECT id, nome, indirizzo, citta, nazione, 
+               COALESCE(codice_cliente, '0000000') as codice_cliente, 
+               COALESCE(codice_destinazione, '000') as codice_destinazione 
+        FROM clienti 
+        ORDER BY nome;
+    """, ttl="0")
 except Exception as e:
     st.error("Errore nel caricamento dell'anagrafica clienti.")
     st.stop()
@@ -33,15 +39,37 @@ if "carrello" not in st.session_state:
 with tab_crea:
     st.subheader("Fase 1 — Selezione o Creazione Cliente")
     
+    # --- BARRA DI FILTRO AVANZATA ---
+    search_cli_t1 = st.text_input("🔍 Cerca Cliente (Filtra per Nome, Cod. Cliente o Nazione):", key="search_cli_t1", placeholder="Es. 1234567, Italia, Rossi...")
+    
+    if search_cli_t1:
+        df_clienti_filtrati_t1 = df_clienti[
+            df_clienti['nome'].str.contains(search_cli_t1, case=False, na=False) |
+            df_clienti['codice_cliente'].str.contains(search_cli_t1, case=False, na=False) |
+            df_clienti['nazione'].str.contains(search_cli_t1, case=False, na=False)
+        ]
+    else:
+        df_clienti_filtrati_t1 = df_clienti
+
     opzioni_cliente = {"-- Seleziona un cliente esistente --": None}
-    for _, row in df_clienti.iterrows():
-        opzioni_cliente[f"{row['nome']} ({row['citta']} - {row['indirizzo']})"] = row['id']
+    for _, row in df_clienti_filtrati_t1.iterrows():
+        # Formato richiesto: [CLI DEST] Nome completo + dettagli spedizione
+        label = f"[{row['codice_cliente']} {row['codice_destinazione']}] {row['nome']} ({row['citta']} - {row['indirizzo']})"
+        opzioni_cliente[label] = row['id']
         
     cliente_scelto = st.selectbox("Seleziona il Destinatario della spedizione", list(opzioni_cliente.keys()))
     cliente_id = opzioni_cliente[cliente_scelto]
     
     with st.expander("➕ Il cliente non esiste? Crealo ora al volo"):
         with st.form("form_rapido_cliente", clear_on_submit=True):
+            st.write("##### 🆔 Codici Gestionali Aziendali")
+            col_cod1, col_cod2 = st.columns(2)
+            with col_cod1:
+                c_cod_cli = st.text_input("Cod. Cliente (7 cifre) *", max_chars=7, placeholder="Es. 1234567")
+            with col_cod2:
+                c_cod_dest = st.text_input("Cod. Destinazione (3 cifre) *", max_chars=3, placeholder="Es. 001")
+                
+            st.write("##### 📍 Dati Anagrafici e Spedizione")
             col1, col2 = st.columns(2)
             with col1:
                 c_nome = st.text_input("Ragione Sociale / Nome *")
@@ -55,20 +83,28 @@ with tab_crea:
             
             submit_c = st.form_submit_button("Registra Cliente")
             if submit_c:
-                if not c_nome or not c_ind or not c_citta or not c_cap:
-                    st.error("Compila tutti i campi obbligatori del cliente (*)")
+                if not c_nome or not c_ind or not c_citta or not c_cap or not c_cod_cli or not c_cod_dest:
+                    st.error("Compila tutti i campi obbligatori del cliente (*), inclusi i codici gestionali.")
+                elif len(c_cod_cli) != 7 or not c_cod_cli.isdigit():
+                    st.error("Il Codice Cliente deve essere composto esattamente da 7 cifre numeriche.")
+                elif len(c_cod_dest) != 3 or not c_cod_dest.isdigit():
+                    st.error("Il Codice Destinazione deve essere composto esattamente da 3 cifre numeriche.")
                 else:
                     try:
                         with conn.session as session:
                             session.execute(
                                 text("""
-                                INSERT INTO clienti (nome, indirizzo, citta, cap, nazione, email, note)
-                                VALUES (:nome, :ind, :citta, :cap, :naz, :email, :note);
+                                INSERT INTO clienti (nome, indirizzo, citta, cap, nazione, email, note, codice_cliente, codice_destinazione)
+                                VALUES (:nome, :ind, :citta, :cap, :naz, :email, :note, :cod_cli, :cod_dest);
                                 """),
-                                params={"nome": c_nome, "ind": c_ind, "citta": c_citta, "cap": c_cap, "naz": c_naz, "email": c_mail if c_mail else None, "note": c_note if c_note else None}
+                                params={
+                                    "nome": c_nome, "ind": c_ind, "citta": c_citta, "cap": c_cap, "naz": c_naz, 
+                                    "email": c_mail if c_mail else None, "note": c_note if c_note else None,
+                                    "cod_cli": c_cod_cli, "cod_dest": c_cod_dest
+                                }
                             )
                             session.commit()
-                        st.success(f"Cliente '{c_nome}' registrato con successo! Ora puoi selezionarlo nel menu sopra.")
+                        st.success(f"Cliente '{c_nome}' registrato con successo con codice [{c_cod_cli} {c_cod_dest}]!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Errore durante l'inserimento del cliente: {e}")
@@ -139,7 +175,6 @@ with tab_crea:
             else:
                 try:
                     with conn.session as session:
-                        # 1. Inserisce la testata dell'ordine
                         res = session.execute(
                             text("""
                             INSERT INTO ordini_testata (cliente_id, note, stato)
@@ -150,7 +185,6 @@ with tab_crea:
                         )
                         ordine_id_nuovo = res.fetchone()[0]
                         
-                        # 2. Inserisce tutte le righe
                         for item in st.session_state.carrello:
                             session.execute(
                                 text("""
@@ -177,9 +211,12 @@ with tab_modifica:
     st.subheader("Gestione e Modifica Richieste Pendenti")
     
     try:
-        # Recuperiamo anche t.cliente_id per poterlo pre-selezionare nel cambio cliente
+        # Recuperiamo anche i codici cliente per formattare il selettore ordini
         query_ordini = """
-            SELECT t.id, t.numero_ordine, t.cliente_id, c.nome as cliente_nome, t.data_creazione
+            SELECT t.id, t.numero_ordine, t.cliente_id, c.nome as cliente_nome, 
+                   COALESCE(c.codice_cliente, '0000000') as codice_cliente, 
+                   COALESCE(c.codice_destinazione, '000') as codice_destinazione,
+                   t.data_creazione
             FROM ordini_testata t
             JOIN clienti c ON t.cliente_id = c.id
             WHERE t.stato = 'Nuovo'
@@ -195,17 +232,16 @@ with tab_modifica:
     else:
         opzioni_ordini = {"-- Seleziona un ordine da modificare --": None}
         for _, row in df_ordini_nuovi.iterrows():
-            opzioni_ordini[f"Ordine N° {row['numero_ordine']} - Per: {row['cliente_nome']}"] = row['id']
+            opzioni_ordini[f"Ordine N° {row['numero_ordine']} - Per: [{row['codice_cliente']} {row['codice_destinazione']}] {row['cliente_nome']}"] = row['id']
             
         ordine_selezionato_id = st.selectbox("Scegli l'ordine da visionare/modificare", list(opzioni_ordini.keys()))
         id_ordine_target = opzioni_ordini[ordine_selezionato_id]
         
         if id_ordine_target:
-            # Estraiamo la riga dell'ordine selezionato per sapere chi è il cliente attuale
             ordine_corrente_row = df_ordini_nuovi[df_ordini_nuovi['id'] == id_ordine_target].iloc[0]
             id_cliente_attuale = ordine_corrente_row['cliente_id']
 
-            # 1. Recupera le righe attuali dell'ordine selezionato
+            # 1. Recupera le righe dell'ordine
             query_righe = """
                 SELECT r.id as riga_id, p.id as prodotto_id, p.barcode, p.descrizione, r.quantita_richiesta, p.quantita_disponibile
                 FROM ordini_righe r
@@ -214,14 +250,13 @@ with tab_modifica:
             """
             df_righe_target = conn.query(query_righe, params={"ordine_id": id_ordine_target}, ttl="0")
             
-            # 2. Recupera l'elenco di tutti i prodotti in magazzino per consentire la nuova aggiunta
+            # 2. Recupera tutti i prodotti per l'aggiunta extra
             try:
                 df_prodotti_all = conn.query("SELECT id, barcode, descrizione, brand, quantita_disponibile, posizione FROM prodotti WHERE quantita_disponibile > 0 ORDER BY descrizione;", ttl="0")
             except Exception as e:
                 st.error("Errore nel caricamento del catalogo prodotti per l'aggiunta.")
                 df_prodotti_all = pd.DataFrame()
 
-            # Filtra il catalogo escludendo i prodotti che l'ordine contiene già
             prodotti_gia_presenti = df_righe_target['prodotto_id'].tolist() if not df_righe_target.empty else []
             df_prodotti_filtrati = df_prodotti_all[~df_prodotti_all['id'].isin(prodotti_gia_presenti)] if not df_prodotti_all.empty else pd.DataFrame()
             
@@ -229,20 +264,38 @@ with tab_modifica:
             with st.form("form_modifica_ordine"):
                 st.write("#### 👤 Anagrafica Destinatario Spedizione")
                 
-                # Creiamo la lista per il selectbox del cambio cliente, calcolando l'indice di default corrente
+                # Barra filtro per il cambio cliente all'interno del form di modifica
+                search_cli_t2 = st.text_input("🔍 Filtra la lista dei clienti sostitutivi (Nome, Codice, Nazione):", placeholder="Scrivi qui per accorciare la lista sotto...")
+                
+                if search_cli_t2:
+                    df_clienti_filtrati_t2 = df_clienti[
+                        df_clienti['nome'].str.contains(search_cli_t2, case=False, na=False) |
+                        df_clienti['codice_cliente'].str.contains(search_cli_t2, case=False, na=False) |
+                        df_clienti['nazione'].str.contains(search_cli_t2, case=False, na=False)
+                    ]
+                else:
+                    df_clienti_filtrati_t2 = df_clienti
+                
                 lista_nomi_clienti = []
                 mappa_clienti_mod = {}
                 default_idx = 0
                 
-                for idx_c, r_c in df_clienti.iterrows():
-                    testo_c = f"{r_c['nome']} ({r_c['citta']} - {r_c['indirizzo']})"
+                for idx_c, r_c in df_clienti_filtrati_t2.iterrows():
+                    testo_c = f"[{r_c['codice_cliente']} {r_c['codice_destinazione']}] {r_c['nome']} ({r_c['citta']})"
                     lista_nomi_clienti.append(testo_c)
                     mappa_clienti_mod[testo_c] = r_c['id']
                     if r_c['id'] == id_cliente_attuale:
                         default_idx = len(lista_nomi_clienti) - 1
                 
-                nuovo_cliente_scelto = st.selectbox("Assegna l'ordine a un cliente differente:", lista_nomi_clienti, index=default_idx, key=f"cli_mod_{id_ordine_target}")
-                id_nuovo_cliente = mappa_clienti_mod[nuovo_cliente_scelto]
+                if not lista_nomi_clienti:
+                    st.warning("Nessun cliente corrisponde al filtro inserito.")
+                    id_nuovo_cliente = id_cliente_attuale
+                else:
+                    # Se il cliente attuale è stato escluso dai filtri di ricerca, impostiamo l'indice a 0
+                    if default_idx >= len(lista_nomi_clienti) or default_idx < 0:
+                        default_idx = 0
+                    nuovo_cliente_scelto = st.selectbox("Assegna l'ordine a:", lista_nomi_clienti, index=default_idx, key=f"cli_mod_{id_ordine_target}")
+                    id_nuovo_cliente = mappa_clienti_mod[nuovo_cliente_scelto]
 
                 st.divider()
                 st.write("#### 📦 Righe attuali dell'ordine:")
@@ -250,7 +303,6 @@ with tab_modifica:
                 cambiamenti = {}
                 cancellazioni = []
                 
-                # Rendering delle righe già esistenti
                 for _, riga in df_righe_target.iterrows():
                     col_b, col_d, col_q, col_del = st.columns([2, 4, 2, 1])
                     col_b.write(f"`{riga['barcode']}`")
@@ -271,8 +323,6 @@ with tab_modifica:
                         cancellazioni.append(riga['riga_id'])
                     elif nuova_qty != riga['quantita_richiesta']:
                         cambiamenti[riga['riga_id']] = nuova_qty
-                
-                st.write("⚠️ *Nota: Se elimini tutte le righe manuali, l'ordine rimarrà vuoto.*")
                 
                 # AGGIUNTA ARTICOLO EXTRA
                 st.divider()
@@ -296,33 +346,22 @@ with tab_modifica:
                 if btn_salva_modifiche:
                     try:
                         with conn.session as session:
-                            # 1. Aggiorna il cliente in testata se modificato
                             if id_nuovo_cliente != id_cliente_attuale:
                                 session.execute(
                                     text("UPDATE ordini_testata SET cliente_id = :cli_id WHERE id = :id;"),
                                     params={"cli_id": id_nuovo_cliente, "id": id_ordine_target}
                                 )
-
-                            # 2. Processa le cancellazioni delle righe esistenti
                             for riga_id in cancellazioni:
                                 session.execute(text("DELETE FROM ordini_righe WHERE id = :id"), params={"id": riga_id})
-                            
-                            # 3. Processa le modifiche di quantità delle righe esistenti
                             for riga_id, qta in cambiamenti.items():
                                 session.execute(text("UPDATE ordini_righe SET quantita_richiesta = :qta WHERE id = :id"), params={"qta": qta, "id": riga_id})
-                            
-                            # 4. Inserisce l'articolo extra se selezionato
-                            if nuovo_p_row is not None:
+                            if  nuovo_p_row is not None:
                                 session.execute(
                                     text("""
                                     INSERT INTO ordini_righe (ordine_id, prodotto_id, quantita_richiesta)
                                     VALUES (:ordine_id, :prodotto_id, :qty);
                                     """),
-                                    params={
-                                        "ordine_id": id_ordine_target,
-                                        "prodotto_id": nuovo_p_row["id"],
-                                        "qty": nuova_p_qty
-                                    }
+                                    params={"ordine_id": id_ordine_target, "prodotto_id": nuovo_p_row["id"], "qty": nuova_p_qty}
                                 )
                             session.commit()
                         st.success("Ordine aggiornato con successo!")
@@ -332,17 +371,14 @@ with tab_modifica:
 
             # --- SEZIONE DISTRUTTIVA: CANCELLAZIONE TOTALE ORDINE ---
             st.write("")
-            st.write("")
             with st.expander("🚨 Zona Pericolo — Elimina Interamente l'Ordine"):
-                st.warning("Attenzione! Questa azione è irreversibile. L'ordine verrà completamente rimosso dal sistema e sparirà definitivamente sia dal database che dalla lista del magazzino.")
+                st.warning("Attenzione! Questa azione è irreversibile.")
                 conferma_cancellazione = st.checkbox("Confermo di voler eliminare ed eliminare del tutto questo ordine", key=f"conf_del_{id_ordine_target}")
                 
                 if st.button("🗑️ Elimina Ordine e Fallo Sparire", type="primary", disabled=not conferma_cancellazione, key=f"btn_del_{id_ordine_target}"):
                     try:
                         with conn.session as session:
-                            # Elimina prima le righe collegate per rispettare i vincoli relazionali (Foreign Key)
                             session.execute(text("DELETE FROM ordini_righe WHERE ordine_id = :id;"), params={"id": id_ordine_target})
-                            # Elimina la testata dell'ordine
                             session.execute(text("DELETE FROM ordini_testata WHERE id = :id;"), params={"id": id_ordine_target})
                             session.commit()
                         st.success("Ordine eliminato con successo. È sparito dal sistema!")

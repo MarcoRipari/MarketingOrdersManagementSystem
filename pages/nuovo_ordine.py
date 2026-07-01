@@ -244,7 +244,7 @@ with tab_modifica:
 
             # 1. Recupera le righe dell'ordine
             query_righe = """
-                SELECT r.id as riga_id, p.id as prodotto_id, p.barcode, p.descrizione, r.quantita_richiesta, p.quantita_disponibile
+                SELECT r.id as riga_id, p.id as prodotto_id, p.barcode, p.brand, p.descrizione, r.quantita_richiesta, p.quantita_disponibile
                 FROM ordini_righe r
                 JOIN prodotti p ON r.prodotto_id = p.id
                 WHERE r.ordine_id = :ordine_id

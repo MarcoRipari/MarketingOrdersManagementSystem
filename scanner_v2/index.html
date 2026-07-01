@@ -23,17 +23,20 @@
             document.getElementById('error-log').innerText = msg;
         }
 
+        // Struttura blindata: apiVersion inviata di default in OGNI pacchetto
         function inviaMessaggioStreamlit(type, payload = {}) {
             window.parent.postMessage({
                 isStreamlitMessage: true,
+                apiVersion: 1,
                 type: type,
                 ...payload
             }, '*');
         }
 
-        // Handshake corretto obbligatorio per Streamlit v1.x+
-        inviaMessaggioStreamlit('streamlit:componentReady', { apiVersion: 1 });
+        // 1. Handshake iniziale immediato
+        inviaMessaggioStreamlit('streamlit:componentReady');
 
+        // 2. Risposta al dimensionamento dell'iframe
         window.addEventListener("message", (event) => {
             if (event.data && event.data.type === "streamlit:render") {
                 inviaMessaggioStreamlit('streamlit:setFrameHeight', { height: 240 });
@@ -51,132 +54,10 @@
                     codeReader.reset();
                 }
             }).catch(camErr => {
-                loggaErroreVisivo("⚠️ Fotocamera posteriore non pronta.");
+                loggaErroreVisivo("⚠️ Fotocamera posteriore non pronta o permessi negati.");
             });
         } catch (e) {
-            loggaErroreVisivo("⚠️ Errore libreria ottica.");
-        }
-    </script>
-</body>
-</html><!DOCTYPE html>
-<html>
-<head>
-    <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
-    <style>
-        body { margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: transparent; font-family: sans-serif; }
-        .scanner-window { position: relative; width: 100%; max-width: 400px; height: 210px; border-radius: 12px; overflow: hidden; border: 3px solid #ff4b4b; background-color: #000; }
-        video { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .laser-line { position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: #ff0000; box-shadow: 0 0 8px #ff0000; animation: target 2.5s infinite ease-in-out; }
-        #error-log { color: #ff4b4b; font-size: 11px; margin-top: 4px; text-align: center; width: 100%; max-width: 400px; font-weight: bold; }
-        @keyframes target { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
-    </style>
-</head>
-<body>
-    <div class="scanner-window">
-        <video id="webcam_feed" autoplay playsinline muted></video>
-        <div class="laser-line"></div>
-    </div>
-    <div id="error-log"></div>
-
-    <script>
-        function loggaErroreVisivo(msg) {
-            document.getElementById('error-log').innerText = msg;
-        }
-
-        function inviaMessaggioStreamlit(type, payload = {}) {
-            window.parent.postMessage({
-                isStreamlitMessage: true,
-                type: type,
-                ...payload
-            }, '*');
-        }
-
-        // 1. CORREZIONE: Streamlit pretende 'apiVersion' anziché 'version'
-        inviaMessaggioStreamlit('streamlit:componentReady', { apiVersion: 1 });
-
-        // 2. Risposta al render per definire l'altezza fissa dell'iframe
-        window.addEventListener("message", (event) => {
-            if (event.data && event.data.type === "streamlit:render") {
-                inviaMessaggioStreamlit('streamlit:setFrameHeight', { height: 240 });
-            }
-        });
-
-        try {
-            const codeReader = new ZXing.BrowserMultiFormatReader();
-            const constraints = { video: { facingMode: "environment" } };
-
-            codeReader.decodeFromConstraints(constraints, 'webcam_feed', (result, err) => {
-                if (result) {
-                    const payloadDati = JSON.stringify({ barcode: result.text, ts: Date.now() });
-                    inviaMessaggioStreamlit('streamlit:setComponentValue', { value: payloadDati });
-                    codeReader.reset();
-                }
-            }).catch(camErr => {
-                loggaErroreVisivo("⚠️ Fotocamera non pronta o permessi negati.");
-            });
-        } catch (e) {
-            loggaErroreVisivo("⚠️ Errore inizializzazione lettore ottico.");
-        }
-    </script>
-</body>
-</html><!DOCTYPE html>
-<html>
-<head>
-    <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
-    <style>
-        body { margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: transparent; font-family: sans-serif; }
-        .scanner-window { position: relative; width: 100%; max-width: 400px; height: 210px; border-radius: 12px; overflow: hidden; border: 3px solid #ff4b4b; background-color: #000; }
-        video { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .laser-line { position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: #ff0000; box-shadow: 0 0 8px #ff0000; animation: target 2.5s infinite ease-in-out; }
-        #error-log { color: #ff4b4b; font-size: 11px; margin-top: 4px; text-align: center; width: 100%; max-width: 400px; font-weight: bold; }
-        @keyframes target { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
-    </style>
-</head>
-<body>
-    <div class="scanner-window">
-        <video id="webcam_feed" autoplay playsinline muted></video>
-        <div class="laser-line"></div>
-    </div>
-    <div id="error-log"></div>
-
-    <script>
-        function loggaErroreVisivo(msg) {
-            document.getElementById('error-log').innerText = msg;
-        }
-
-        function inviaMessaggioStreamlit(type, payload = {}) {
-            window.parent.postMessage({
-                isStreamlitMessage: true,
-                type: type,
-                ...payload
-            }, '*');
-        }
-
-        // 1. Handshake iniziale immediato al caricamento del DOM
-        inviaMessaggioStreamlit('streamlit:componentReady', { version: 1 });
-
-        // 2. Risposta al render per definire l'altezza fissa dell'iframe
-        window.addEventListener("message", (event) => {
-            if (event.data && event.data.type === "streamlit:render") {
-                inviaMessaggioStreamlit('streamlit:setFrameHeight', { height: 240 });
-            }
-        });
-
-        try {
-            const codeReader = new ZXing.BrowserMultiFormatReader();
-            const constraints = { video: { facingMode: "environment" } };
-
-            codeReader.decodeFromConstraints(constraints, 'webcam_feed', (result, err) => {
-                if (result) {
-                    const payloadDati = JSON.stringify({ barcode: result.text, ts: Date.now() });
-                    inviaMessaggioStreamlit('streamlit:setComponentValue', { value: payloadDati });
-                    codeReader.reset();
-                }
-            }).catch(camErr => {
-                loggaErroreVisivo("⚠️ Fotocamera non pronta o permessi negati.");
-            });
-        } catch (e) {
-            loggaErroreVisivo("⚠️ Errore inizializzazione lettore ottico.");
+            loggaErroreVisivo("⚠️ Errore hardware/libreria ottica.");
         }
     </script>
 </body>

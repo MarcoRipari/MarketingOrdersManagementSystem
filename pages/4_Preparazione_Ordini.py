@@ -5,6 +5,8 @@ import streamlit.components.v1 as components
 import json
 import os
 
+from utils_scanner import live_barcode_scanner
+
 # Configurazione ottimizzata per mobile/desktop di magazzino
 st.set_page_config(page_title="SGLM - Picking Mobile", layout="centered")
 
@@ -12,74 +14,6 @@ st.set_page_config(page_title="SGLM - Picking Mobile", layout="centered")
 conn = st.connection("postgresql", type="sql")
 
 st.title("📱 Modulo C — Picking Mobile")
-
-## ====================================================
-## INIZIALIZZAZIONE COMPONENTE BIDIREZIONALE CAMERA
-## ====================================================
-@st.cache_resource
-def inizializza_componente_scanner():
-    """Crea dinamicamente i file necessari per il componente bidirezionale"""
-    cartella_componente = "scanner_ottico_local"
-    if not os.path.exists(cartella_componente):
-        os.makedirs(cartella_componente)
-    
-    html_custom = """<!DOCTYPE html>
-    <html>
-    <head>
-        <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
-        <style>
-            body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; background-color: transparent; }
-            .scanner-window { position: relative; width: 100%; max-width: 400px; border-radius: 12px; overflow: hidden; border: 3px solid #ff4b4b; background-color: #000; }
-            video { width: 100%; height: auto; display: block; }
-            .laser-line { position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: #ff0000; box-shadow: 0 0 8px #ff0000; animation: target 2.5s infinite ease-in-out; }
-            @keyframes target { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
-        </style>
-    </head>
-    <body>
-        <div class="scanner-window">
-            <video id="webcam_feed" autoplay playsinline muted></video>
-            <div class="laser-line"></div>
-        </div>
-        <script>
-            // Funzione nativa per rispedire il dato a Streamlit in modo sicuro
-            function inviaDatoAPython(valore) {
-                window.parent.postMessage({
-                    type: 'streamlit:setComponentValue',
-                    value: valore
-                }, '*');
-            }
-
-            // Handshake iniziale obbligatorio per i Custom Components
-            window.parent.postMessage({type: 'streamlit:componentReady', version: 1}, '*');
-
-            window.addEventListener("message", (event) => {
-                if (event.data.type === "streamlit:render") {
-                    // Componente pronto e renderizzato dalla UI parent
-                }
-            });
-
-            const codeReader = new ZXing.BrowserMultiFormatReader();
-            const constraints = { video: { facingMode: "environment" } };
-
-            codeReader.decodeFromConstraints(constraints, 'webcam_feed', (result, err) => {
-                if (result) {
-                    // Stringa JSON pulita catturata dal flusso video live
-                    inviaDatoAPython(JSON.stringify({ barcode: result.text, ts: Date.now() }));
-                    codeReader.reset();
-                }
-            });
-        </script>
-    </body>
-    </html>"""
-    
-    with open(os.path.join(cartella_componente, "index.html"), "w", encoding="utf-8") as f:
-        f.write(html_custom)
-        
-    return components.declare_component("live_barcode_scanner", path=cartella_componente)
-
-# Registrazione del lettore ottico reale
-live_barcode_scanner = inizializza_componente_scanner()
-
 
 ## ----------------------------------------------------
 ## INIZIALIZZAZIONE SESSION STATE PER L'ORDINE IN CORSO

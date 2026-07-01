@@ -3,6 +3,7 @@ import os
 import streamlit as st
 import streamlit.components.v1 as components
 
+
 @st.cache_resource
 def inizializza_componente_scanner():
     """Crea dinamicamente i file necessari per il componente bidirezionale con handshake completo"""

@@ -125,7 +125,7 @@ else:
                     st.caption("🔴 *Nota: L'ordine è partito incompleto per mancanze stock segnalate in picking.*")
                 
                 # Bottone per simulare il link esterno di tracciamento del corriere
-                if(ordine['corriere'] == "BRT"]):
+                if(ordine['corriere'] == "BRT"):
                     url_mock = f"https://www.mybrt.it/it/mybrt/my-parcels/incoming?parcelNumber={ordine['tracking_number']}"
                 else:
                     url_mock = f"https://www.google.com/search?q=tracking+button+{ordine['corriere']}+{ordine['tracking_number']}"

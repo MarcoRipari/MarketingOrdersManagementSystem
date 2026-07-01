@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from sqlalchemy import text
 
 st.set_page_config(page_title="SGLM - Inventario & Stock", layout="wide")
 
@@ -125,7 +126,7 @@ if ruolo_utente == "Operatore (Magazzino)":
                         with conn.session as session:
                             session.execute(
                                 """
-                                INSERT INTO prodotti (barcode, descrizione, brand, stagione_riferimento, anno_riferimento, posizione, quantita_disponibile, scorta_minima)
+                                UPDATE prodotti SET (barcode, descrizione, brand, stagione_riferimento, anno_riferimento, posizione, quantita_disponibile, scorta_minima)
                                 VALUES (:barcode, :desc, :brand, :stagione, :anno, :posizione, :qty, :scorta);
                                 """,
                                 params={

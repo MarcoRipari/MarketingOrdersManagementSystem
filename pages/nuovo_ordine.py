@@ -104,7 +104,7 @@ with tab_crea:
                 if item["prodotto_id"] == prodotto_row["id"]:
                     nuova_totale = item["quantita"] + qty_richiesta
                     if nuova_totale <= prodotto_row['quantita_disponibile']:
-                        item["quantita"] = nueva_totale
+                        item["quantita"] = nuova_totale
                         gia_presente = True
                         st.toast("Quantità aggiornata nel carrello!")
                     else:
@@ -114,7 +114,7 @@ with tab_crea:
             if not gia_presente:
                 st.session_state.carrello.append({
                     "prodotto_id": prodotto_row["id"],
-                    "barcode": producto_row["barcode"],
+                    "barcode": prodotto_row["barcode"],  # 👈 Sostituito 'producto_row' con 'prodotto_row'
                     "descrizione": prodotto_row["descrizione"],
                     "quantita": qty_richiesta
                 })

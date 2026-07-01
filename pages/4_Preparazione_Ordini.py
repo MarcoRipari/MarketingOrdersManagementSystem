@@ -33,7 +33,7 @@ if st.session_state.ordine_in_picking_id is None:
     
     try:
         query_nuovi = """
-            SELECT t.id, t.numero_ordine, c.nome as cliente_nome, t.data_creazione,
+            SELECT t.id, t.numero_ordine, c.nome as cliente_nome, (t.data_creazione AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Rome'),
                    (SELECT COUNT(*) FROM ordini_righe WHERE ordine_id = t.id) as totale_righe
             FROM ordini_testata t
             JOIN clienti c ON t.cliente_id = c.id
@@ -63,7 +63,7 @@ if st.session_state.ordine_in_picking_id is None:
                             res = session.execute(
                                 text("""
                                     UPDATE ordini_testata
-                                    SET stato = 'In Picking', data_aggiornamento = NOW()
+                                    SET stato = 'In Picking', data_aggiornamento = TIMEZONE('Europe/Rome', NOW())
                                     WHERE id = :ordine_id AND stato = 'Nuovo'
                                     RETURNING id;
                                 """),
@@ -111,7 +111,7 @@ else:
         try:
             with conn.session as session:
                 session.execute(
-                    text("UPDATE ordini_testata SET stato = 'Nuovo', data_aggiornamento = NOW() WHERE id = :id;"),
+                    text("UPDATE ordini_testata SET stato = 'Nuovo', data_aggiornamento = TIMEZONE('Europe/Rome', NOW()) WHERE id = :id;"),
                     params={"id": id_ordine_attivo}
                 )
                 session.commit()
@@ -276,7 +276,7 @@ else:
                         SET stato = 'Pronto Spedizione',
                             evaso_parziale = :evaso_parziale,
                             numero_colli = :numero_colli,
-                            data_aggiornamento = NOW()
+                            data_aggiornamento = TIMEZONE('Europe/Rome', NOW())
                         WHERE id = :id;
                     """),
                     params={

@@ -140,7 +140,7 @@ with tab_crea:
                         res = session.execute(
                             text("""
                             INSERT INTO ordini_testata (cliente_id, note, stato)
-                            VALUES (:cliente_id, :email, :note, 'Nuovo')
+                            VALUES (:cliente_id, :note, 'Nuovo')
                             RETURNING id;
                             """),
                             params={"cliente_id": cliente_id

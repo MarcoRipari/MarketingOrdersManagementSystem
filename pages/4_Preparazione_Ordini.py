@@ -130,10 +130,15 @@ else:
                    r.quantita_richiesta, r.quantita_prelevata
             FROM ordini_righe r
             JOIN prodotti p ON r.prodotto_id = p.id
-            WHERE r.ordine_id = :ordine_id
-            ORDER BY p.posizione ASC;
+            WHERE r.ordine_id = :ordine_id;
         """
         df_righe_picking = conn.query(query_righe, params={"ordine_id": id_ordine_attivo}, ttl="0")
+        
+        # --- IMPLEMENTAZIONE ORDINAMENTO NUMERICO PURO ---
+        if not df_righe_picking.empty:
+            df_righe_picking['posizione_num'] = pd.to_numeric(df_righe_picking['posizione'], errors='coerce').fillna(9999)
+            df_righe_picking = df_righe_picking.sort_values(by='posizione_num').drop(columns=['posizione_num'])
+
     except Exception as e:
         st.error(f"Errore nel caricamento delle righe d'ordine: {e}")
         st.stop()
@@ -166,7 +171,7 @@ else:
                     if f"err_msg_{r_id}" in st.session_state and st.session_state[f"err_msg_{r_id}"]:
                         st.error(st.session_state[f"err_msg_{r_id}"])
                     
-                    # RENDER DEL NUOVO CUSTOM COMPONENT BIDIREZIONALE (Ritorna dati reali a Python!)
+                    # RENDER DEL NUOVO CUSTOM COMPONENT BIDIREZIONALE
                     res_scanner = live_barcode_scanner(key=f"custom_camera_feed_{r_id}")
                     
                     if res_scanner:
@@ -233,7 +238,7 @@ else:
                     st.info("⏳ In attesa del completamento dell'articolo precedente nella mappa di percorso.")
 
     ## ====================================================
-    ## FASE 3: CHIUSURA DEFINITIVA DEL PICKING
+    ## FASE 3: CHIUSURA DEFINITIVA DEL PICKING + INSERIMENTO COLLI
     ## ====================================================
     st.divider()
     st.subheader("🏁 Fine Prelievo")
@@ -242,6 +247,16 @@ else:
         st.success("👍 Tutte le righe di questo ordine sono state elaborate.")
     else:
         st.warning("⚠️ Attenzione: Ci sono ancora righe non verificate.")
+
+    # --- INPUT NUMERO COLLI OBBLIGATORIO PRIMA DELLA CHIUSURA ---
+    numero_colli = st.number_input(
+        "📦 Specificare il numero di colli (scatole) totali:",
+        min_value=1,
+        max_value=100,
+        value=1,
+        step=1,
+        key="picking_numero_colli"
+    )
 
     if st.button("🏁 Chiudi Picking e Invia all'Imballo", type="primary", use_container_width=True):
         try:
@@ -259,14 +274,19 @@ else:
                         UPDATE ordini_testata
                         SET stato = 'Pronto Spedizione',
                             evaso_parziale = :evaso_parziale,
+                            numero_colli = :numero_colli,
                             data_aggiornamento = NOW()
                         WHERE id = :id;
                     """),
-                    params={"evaso_parziale": ha_mancanti, "id": id_ordine_attivo}
+                    params={
+                        "evaso_parziale": ha_mancanti, 
+                        "numero_colli": int(numero_colli), 
+                        "id": id_ordine_attivo
+                    }
                 )
                 session.commit()
             
-            st.success("🎉 Ordine completato con successo!")
+            st.success(f"🎉 Ordine completato con successo! Registrati {numero_colli} colli.")
             st.session_state.ordine_in_picking_id = None
             st.session_state.righe_confermate_sessione = set()
             st.rerun()

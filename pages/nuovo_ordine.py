@@ -125,7 +125,7 @@ with tab_crea:
         
         opzioni_prodotti = {}
         for _, row in df_prodotti.iterrows():
-            opzioni_prodotti[f"[{row['barcode']}] {row['descrizione']} (Disponibili: {row['quantita_disponibile']} in {row['posizione']})"] = row
+            opzioni_prodotti[f"{row['brand']} - {row['descrizione']} (Disponibili: {row['quantita_disponibile']})"] = row
             
         prodotto_selezionato_testo = col_p.selectbox("Scegli l'articolo da aggiungere", list(opzioni_prodotti.keys()))
         prodotto_row = opzioni_prodotti[prodotto_selezionato_testo]

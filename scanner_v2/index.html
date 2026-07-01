@@ -43,6 +43,98 @@
             }
         });
 
+        // --- FIX: debounce per evitare invii ripetuti dello stesso codice ad ogni frame ---
+        let ultimoCodiceInviato = null;
+        let ultimoInvioTs = 0;
+        const COOLDOWN_MS = 1200; // tempo minimo prima di reinviare lo STESSO codice
+
+        try {
+            const codeReader = new ZXing.BrowserMultiFormatReader();
+            const constraints = { video: { facingMode: "environment" } };
+
+            codeReader.decodeFromConstraints(constraints, 'webcam_feed', (result, err) => {
+                if (result) {
+                    const ora = Date.now();
+                    const stessoCodice = result.text === ultimoCodiceInviato;
+                    const tempoTrascorso = ora - ultimoInvioTs;
+
+                    // Invia solo se è un codice diverso dall'ultimo, oppure se è passato
+                    // il periodo di cooldown (utile se l'operatore ripassa lo stesso codice
+                    // sbagliato e vuole che venga rivalutato)
+                    if (!stessoCodice || tempoTrascorso > COOLDOWN_MS) {
+                        ultimoCodiceInviato = result.text;
+                        ultimoInvioTs = ora;
+                        const payloadDati = JSON.stringify({ barcode: result.text, ts: ora });
+                        inviaMessaggioStreamlit('streamlit:setComponentValue', { value: payloadDati });
+                    }
+
+                    // --- FIX PRINCIPALE: NIENTE reset() qui ---
+                    // In precedenza reset() veniva chiamato su OGNI lettura (anche errata),
+                    // spegnendo la fotocamera e lasciando lo schermo nero perché il
+                    // componente non viene mai ricreato (key fissa). Ora lo stream resta
+                    // sempre attivo: l'operatore può scansionare articoli successivi senza
+                    // interruzioni e senza dover ridare i permessi.
+                }
+                // "err" qui è la normale NotFoundException quando nel frame non c'è
+                // nessun barcode leggibile: è comportamento atteso, va ignorato.
+            }).catch(camErr => {
+                loggaErroreVisivo("⚠️ Fotocamera posteriore non pronta o permessi negati.");
+            });
+
+            // La fotocamera viene rilasciata SOLO quando l'utente lascia davvero la pagina
+            window.addEventListener('beforeunload', () => {
+                try { codeReader.reset(); } catch (e) {}
+            });
+        } catch (e) {
+            loggaErroreVisivo("⚠️ Errore hardware/libreria ottica.");
+        }
+    </script>
+</body>
+</html><!DOCTYPE html>
+<html>
+<head>
+    <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
+    <style>
+        body { margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: transparent; font-family: sans-serif; }
+        .scanner-window { position: relative; width: 100%; max-width: 400px; height: 210px; border-radius: 12px; overflow: hidden; border: 3px solid #ff4b4b; background-color: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .laser-line { position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: #ff0000; box-shadow: 0 0 8px #ff0000; animation: target 2.5s infinite ease-in-out; }
+        #error-log { color: #ff4b4b; font-size: 11px; margin-top: 4px; text-align: center; width: 100%; max-width: 400px; font-weight: bold; }
+        @keyframes target { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
+    </style>
+</head>
+<body>
+    <div class="scanner-window">
+        <video id="webcam_feed" autoplay playsinline muted></video>
+        <div class="laser-line"></div>
+    </div>
+    <div id="error-log"></div>
+
+    <script>
+        function loggaErroreVisivo(msg) {
+            document.getElementById('error-log').innerText = msg;
+        }
+
+        // Struttura blindata: apiVersion inviata di default in OGNI pacchetto
+        function inviaMessaggioStreamlit(type, payload = {}) {
+            window.parent.postMessage({
+                isStreamlitMessage: true,
+                apiVersion: 1,
+                type: type,
+                ...payload
+            }, '*');
+        }
+
+        // 1. Handshake iniziale immediato
+        inviaMessaggioStreamlit('streamlit:componentReady');
+
+        // 2. Risposta al dimensionamento dell'iframe
+        window.addEventListener("message", (event) => {
+            if (event.data && event.data.type === "streamlit:render") {
+                inviaMessaggioStreamlit('streamlit:setFrameHeight', { height: 240 });
+            }
+        });
+
         try {
             const codeReader = new ZXing.BrowserMultiFormatReader();
             const constraints = { video: { facingMode: "environment" } };

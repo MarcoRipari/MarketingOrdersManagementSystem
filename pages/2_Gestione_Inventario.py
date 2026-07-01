@@ -24,6 +24,11 @@ ruolo_utente = st.sidebar.radio(
 # Recuperiamo tutti i prodotti dalla vista riepilogativa
 try:
     df_prodotti = conn.query("SELECT * FROM vista_prodotti_riepilogo;", ttl="0")
+    
+    # PERFEZIONAMENTO: Ordinamento alfabetico predefinito per Brand e Descrizione
+    if not df_prodotti.empty:
+        df_prodotti = df_prodotti.sort_values(by=["brand", "descrizione"], ascending=[True, True]).reset_index(drop=True)
+        
 except Exception as e:
     st.error("Errore nel caricamento dei dati dal database.")
     st.exception(e)
@@ -77,9 +82,16 @@ def colora_sotto_scorta(row):
 
 if not df_filtrato.empty:
     # Mostriamo la tabella applicando lo stile di formattazione condizionale
+    # PERFEZIONAMENTO UI: Aggiunto 'column_config' per formattare l'anno e i numeri senza decimali/virgole intermedie
     st.dataframe(
         df_filtrato.style.apply(colora_sotto_scorta, axis=1),
         column_order=["barcode", "descrizione", "brand", "stagione_riferimento", "anno_riferimento", "posizione", "quantita_disponibile", "scorta_minima", "totale_spedito_storico"],
+        column_config={
+            "anno_riferimento": st.column_config.NumberColumn("Anno Rif.", format="%d"),
+            "quantita_disponibile": st.column_config.NumberColumn("Q.tà Disponibile", format="%d"),
+            "scorta_minima": st.column_config.NumberColumn("Scorta Minima", format="%d"),
+            "totale_spedito_storico": st.column_config.NumberColumn("Totale Spedito", format="%d"),
+        },
         use_container_width=True,
         hide_index=True
     )
@@ -107,7 +119,8 @@ if ruolo_utente == "Operatore (Magazzino)":
                 new_brand = st.text_input("Brand (Opzionale)")
             with col2:
                 new_stagione = st.selectbox("Stagione (Opzionale)", [None, "SS", "FW"])
-                new_anno = st.number_input("Anno (Opzionale)", min_value=2020, max_value=2035, value=2026, step=1)
+                # PERFEZIONAMENTO: Rimosso "(Opzionale)" e contrassegnato come obbligatorio (*)
+                new_anno = st.number_input("Anno *", min_value=2020, max_value=2035, value=2026, step=1)
                 new_pos = st.text_input("Posizione a Scaffale (es. A-01-B) *")
             
             col3, col4 = st.columns(2)
@@ -119,20 +132,28 @@ if ruolo_utente == "Operatore (Magazzino)":
             submit_new = st.form_submit_button("Salva Prodotto in Anagrafica")
             
             if submit_new:
-                if not new_barcode or not new_desc or not new_pos:
-                    st.error("I campi Barcode, Descrizione e Posizione sono obbligatori.")
+                # PERFEZIONAMENTO: Aggiunto controllo di validazione stringente anche su 'new_anno'
+                if not new_barcode or not new_desc or not new_pos or not new_anno:
+                    st.error("I campi Barcode, Descrizione, Anno e Posizione sono obbligatori.")
                 else:
                     try:
                         with conn.session as session:
+                            # CORREZIONE BUG SQL: Sostituito l'errato "UPDATE ... VALUES" con un "INSERT INTO" valido
+                            # e applicato il costrutto text() richiesto dalle specifiche SQLAlchemy
                             session.execute(
-                                """
-                                UPDATE prodotti SET (barcode, descrizione, brand, stagione_riferimento, anno_riferimento, posizione, quantita_disponibile, scorta_minima)
-                                VALUES (:barcode, :desc, :brand, :stagione, :anno, :posizione, :qty, :scorta);
-                                """,
+                                text("""
+                                INSERT INTO prodotti (barcode, descrizione, brand, formazione_stagione, anno, posizione, quantita_disponibile, scorta_minima, data_creazione, data_aggiornamento)
+                                VALUES (:barcode, :desc, :brand, :stagione, :anno, :posizione, :qty, :scorta, NOW(), NOW());
+                                """),
                                 params={
-                                    "barcode": new_barcode, "desc": new_desc, "brand": new_brand if new_brand else None,
-                                    "stagione": new_stagione, "anno": new_anno if new_brand else None, "posizione": new_pos,
-                                    "qty": new_qty, "scorta": new_min
+                                    "barcode": new_barcode.strip(), 
+                                    "desc": new_desc.strip(), 
+                                    "brand": new_brand.strip() if new_brand.strip() else None,
+                                    "stagione": new_stagione, 
+                                    "anno": int(new_anno), # CORREZIONE: rimosso l'istruzione condizionale errata
+                                    "posizione": new_pos.strip().upper(), 
+                                    "qty": new_qty, 
+                                    "scorta": new_min
                                 }
                             )
                             session.commit()
@@ -149,7 +170,7 @@ if ruolo_utente == "Operatore (Magazzino)":
             prodotto_scelto = st.selectbox(
                 "Seleziona l'articolo da rettificare",
                 df_prodotti["id"].tolist(),
-                format_func=lambda x: f"{df_prodotti[df_prodotti['id'] == x]['barcode'].values[0]} - {df_prodotti[df_prodotti['id'] == x]['descrizione'].values[0]}"
+                format_func=lambda x: f"{df_prodotti[df_prodotti['id'] == x]['barcode'].values[0]} - {df_prodotti[df_prodotti['id'] == x]['brand'].values[0]} - {df_prodotti[df_prodotti['id'] == x]['descrizione'].values[0]}"
             )
             
             # Recupero dati attuali della riga selezionata
@@ -168,12 +189,12 @@ if ruolo_utente == "Operatore (Magazzino)":
                     try:
                         with conn.session as session:
                             session.execute(
-                                """
+                                text("""
                                 UPDATE prodotti 
-                                SET posizione = :pos, quantita_disponibile = :qty, scorta_minima = :min
+                                SET posizione = :pos, quantita_disponibile = :qty, scorta_minima = :min, data_aggiornamento = NOW()
                                 WHERE id = :id;
-                                """,
-                                params={"pos": edit_pos, "qty": edit_qty, "min": edit_min, "id": prodotto_scelto}
+                                """),
+                                params={"pos": edit_pos.strip().upper(), "qty": edit_qty, "min": edit_min, "id": prodotto_scelto}
                             )
                             session.commit()
                         st.success("Rettifica inventariale registrata!")

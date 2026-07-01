@@ -95,7 +95,7 @@ else:
             
             # Box con anagrafica di spedizione per confronto visivo con etichettatrice
             with st.container(border=True):
-                st.markdown(f"**Codici:** `CLI: {ordine_dettaglio['codice_cliente']}` | `DEST: {ordine_dettaglio['codice_destinazione']}`")
+                st.markdown(f"`{ordine_dettaglio['codice_cliente']} {ordine_dettaglio['codice_destinazione']}`")
                 st.markdown(f"**Destinatario:** {ordine_dettaglio['cliente_nome']}")
                 st.markdown(f"**Indirizzo:** {ordine_dettaglio['indirizzo']}")
                 st.markdown(f"**Località:** {ordine_dettaglio['cap']} - {ordine_dettaglio['citta']} ({ordine_dettaglio['nazione']})")
@@ -108,7 +108,7 @@ else:
                 # Selezione del vettore logistico
                 corriere_sel = st.selectbox(
                     "Corriere Spedizioniere *",
-                    ["-- Seleziona un Corriere --", "DHL Express", "GLS", "BRT Bartolini", "TNT / FedEx", "Susa Trasporti", "Ritiro Diretto / Altro"]
+                    ["-- Seleziona un Corriere --", "BRT", "UPS", "DHL", "Altro"]
                 )
                 
                 # Se l'utente seleziona un corriere generico, può specificarlo sotto

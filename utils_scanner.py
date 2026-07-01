@@ -3,6 +3,93 @@ import os
 import streamlit as st
 import streamlit.components.v1 as components
 
+@st.cache_resource
+def inizializza_componente_scanner():
+    """Crea dinamicamente i file del componente con handshake compatibile con Streamlit Cloud"""
+    # Risoluzione del percorso assoluto per l'ambiente di produzione (Streamlit Cloud)
+    corrente_dir = os.path.dirname(os.path.abspath(__file__))
+    cartella_componente = os.path.join(corrente_dir, "scanner_ottico_local")
+    
+    if not os.path.exists(cartella_componente):
+        os.makedirs(cartella_componente)
+    
+    html_custom = """<!DOCTYPE html>
+    <html>
+    <head>
+        <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
+        <style>
+            body { margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: transparent; font-family: sans-serif; }
+            .scanner-window { position: relative; width: 100%; max-width: 400px; height: 210px; border-radius: 12px; overflow: hidden; border: 3px solid #ff4b4b; background-color: #000; }
+            video { width: 100%; height: 100%; object-fit: cover; display: block; }
+            .laser-line { position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: #ff0000; box-shadow: 0 0 8px #ff0000; animation: target 2.5s infinite ease-in-out; }
+            #error-log { color: #ff4b4b; font-size: 11px; margin-top: 4px; text-align: center; width: 100%; max-width: 400px; font-weight: bold; }
+            @keyframes target { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
+        </style>
+    </head>
+    <body>
+        <div class="scanner-window">
+            <video id="webcam_feed" autoplay playsinline muted></video>
+            <div class="laser-line"></div>
+        </div>
+        <div id="error-log"></div>
+
+        <script>
+            function loggaErroreVisivo(msg) {
+                document.getElementById('error-log').innerText = msg;
+            }
+
+            // STRUTTURA DI SICUREZZA OBBLIGATORIA PER STREAMLIT CLOUD
+            // Il dizionario DEVE contenere "isStreamlitMessage: true" altrimenti il proxy Cloud lo blocca
+            function inviaMessaggioStreamlit(type, payload = {}) {
+                window.parent.postMessage({
+                    isStreamlitMessage: true,
+                    type: type,
+                    ...payload
+                }, '*');
+            }
+
+            // 1. Invia il segnale di pronto (Handshake iniziale)
+            inviaMessaggioStreamlit('streamlit:componentReady', { version: 1 });
+
+            // 2. Rispondi al render impostando l'altezza corretta del frame
+            window.addEventListener("message", (event) => {
+                if (event.data && event.data.type === "streamlit:render") {
+                    inviaMessaggioStreamlit('streamlit:setFrameHeight', { height: 240 });
+                }
+            });
+
+            try {
+                const codeReader = new ZXing.BrowserMultiFormatReader();
+                const constraints = { video: { facingMode: "environment" } };
+
+                codeReader.decodeFromConstraints(constraints, 'webcam_feed', (result, err) => {
+                    if (result) {
+                        const payloadDati = JSON.stringify({ barcode: result.text, ts: Date.now() });
+                        // Invia il codice a barre letto a Python
+                        inviaMessaggioStreamlit('streamlit:setComponentValue', { value: payloadDati });
+                        codeReader.reset();
+                    }
+                }).catch(camErr => {
+                    loggaErroreVisivo("⚠️ Fotocamera posteriore non pronta o bloccata.");
+                });
+            } catch (e) {
+                loggaErroreVisivo("⚠️ Impossibile caricare il motore di scansione.");
+            }
+        </script>
+    </body>
+    </html>"""
+    
+    with open(os.path.join(cartella_componente, "index.html"), "w", encoding="utf-8") as f:
+        f.write(html_custom)
+        
+    return components.declare_component("live_barcode_scanner", path=cartella_componente)
+
+# Istanza pronta per l'importazione
+live_barcode_scanner = inizializza_componente_scanner()# utils_scanner.py
+import os
+import streamlit as st
+import streamlit.components.v1 as components
+
 
 @st.cache_resource
 def inizializza_componente_scanner():

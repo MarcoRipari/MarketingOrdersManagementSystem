@@ -136,7 +136,8 @@ else:
             WHERE r.ordine_id = :ordine_id
             ORDER BY p.posizione ASC;
         """
-        df_righe_picking = conn.query(query_righe, ttl="0")
+        # CORREZIONE: Aggiunto params={"ordine_id": id_ordine_attivo}
+        df_righe_picking = conn.query(query_righe, params={"ordine_id": id_ordine_attivo}, ttl="0")
     except Exception as e:
         st.error(f"Errore nel caricamento delle righe d'ordine: {e}")
         st.stop()

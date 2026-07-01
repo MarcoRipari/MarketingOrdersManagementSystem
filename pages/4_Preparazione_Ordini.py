@@ -202,7 +202,8 @@ else:
                         st.toast(f"Ubicazione {riga_attiva['posizione']} prelevata correttamente!", icon="✅")
                         st.rerun()
                     else:
-                        st.session_state["err_msg_scanner"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."
+                        #st.session_state["err_msg_scanner"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."
+                        st.toast(f"❌ Barcode errato! Codice rilevato: ({codice_rilevato})")
                         st.rerun()
             except Exception:
                 pass

@@ -305,7 +305,7 @@ with tab_modifica:
                 cancellazioni = []
                 
                 for _, riga in df_righe_target.iterrows():
-                    col_b, col_d, col_q, col_del = st.columns([2, 4, 2, 1])
+                    col_b, col_c, col_d, col_q, col_del = st.columns([2, 2, 2, 2, 1])
                     col_b.write(f"`{riga['barcode']}`")
                     col_c.write(riga['brand'])
                     col_d.write(riga['descrizione'])

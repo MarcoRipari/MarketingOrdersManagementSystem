@@ -113,7 +113,7 @@ else:
                 
                 # Se l'utente seleziona un corriere generico, può specificarlo sotto
                 corriere_specifico = ""
-                if corriere_sel == "Ritiro Diretto / Altro":
+                if corriere_sel == "Altro":
                     corriere_specifico = st.text_input("Specifica altro corriere/vettore:", placeholder="Es. Corriere locale, Consegnato a mano...")
                 
                 col_colli, col_tracking = st.columns([1, 2])

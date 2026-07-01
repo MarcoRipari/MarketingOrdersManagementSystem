@@ -307,7 +307,7 @@ with tab_modifica:
                 for _, riga in df_righe_target.iterrows():
                     col_b, col_c, col_d, col_q, col_del = st.columns([2, 2, 2, 2, 1])
                     col_b.write(f"`{riga['barcode']}`")
-                    col_c.write(riga['brand'])
+                    col_c.write(riga)
                     col_d.write(riga['descrizione'])
                     
                     max_consentito = int(riga['quantita_disponibile'] + riga['quantita_richiesta'])

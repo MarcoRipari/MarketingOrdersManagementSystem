@@ -42,7 +42,7 @@
                 inviaMessaggioStreamlit('streamlit:setFrameHeight', { height: 240 });
             }
         });
-
+        
         // --- FIX: debounce per evitare invii ripetuti dello stesso codice ad ogni frame ---
         let ultimoCodiceInviato = null;
         let ultimoInvioTs = 0;

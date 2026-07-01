@@ -144,100 +144,116 @@ else:
         st.stop()
 
     st.write("##### 🗺️ Mappa del percorso di prelievo:")
-    
+
     tutti_completati = True
-    active_item_found = False
-    
+
+    # --- Individua la riga attiva (la prima non ancora confermata) UNA SOLA VOLTA ---
+    riga_attiva = None
+    for _, riga in df_righe_picking.iterrows():
+        gia_prelevato = riga['quantita_prelevata'] > 0 or riga['riga_id'] in st.session_state.righe_confermate_sessione
+        if not gia_prelevato:
+            tutti_completati = False
+            if riga_attiva is None:
+                riga_attiva = riga
+
+    # =========================================================
+    # FOTOCAMERA: istanziata UNA SOLA VOLTA, FUORI DAL CICLO SUI
+    # PRODOTTI, sempre nella stessa posizione del layout e con key
+    # fissa. In questo modo Streamlit riutilizza sempre lo stesso
+    # iframe (niente richiesta permessi ad ogni articolo) e la
+    # fotocamera resta accesa anche dopo una lettura errata
+    # (il fix per lo schermo nero è nel componente scanner_v2).
+    # =========================================================
+    if riga_attiva is not None:
+        r_id_attivo = riga_attiva['riga_id']
+
+        # Se è cambiato l'articolo attivo, resetta l'eventuale messaggio d'errore residuo
+        if st.session_state.get("riga_attiva_corrente") != r_id_attivo:
+            st.session_state["riga_attiva_corrente"] = r_id_attivo
+            st.session_state["err_msg_scanner"] = None
+
+        res_scanner = live_barcode_scanner(key="live_scanner_active_item")
+
+        if res_scanner:
+            try:
+                data_ricevuta = json.loads(res_scanner)
+                codice_rilevato = data_ricevuta["barcode"].strip()
+                timestamp_scan = data_ricevuta["ts"]
+
+                if st.session_state.get("last_processed_ts_scanner") != timestamp_scan:
+                    st.session_state["last_processed_ts_scanner"] = timestamp_scan
+
+                    if codice_rilevato == riga_attiva['barcode'].strip():
+                        st.session_state["err_msg_scanner"] = None
+                        qty_effettiva = st.session_state.get(f"qty_p_{r_id_attivo}", int(riga_attiva['quantita_richiesta']))
+
+                        with conn.session as session:
+                            session.execute(
+                                text("UPDATE ordini_righe SET quantita_prelevata = :q WHERE id = :id;"),
+                                params={"q": qty_effettiva, "id": r_id_attivo}
+                            )
+                            session.execute(
+                                text("UPDATE prodotti SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) WHERE id = :id;"),
+                                params={"q": qty_effettiva, "id": riga_attiva['prodotto_id']}
+                            )
+                            session.commit()
+
+                        st.session_state.righe_confermate_sessione.add(r_id_attivo)
+                        st.toast(f"Ubicazione {riga_attiva['posizione']} prelevata correttamente!", icon="✅")
+                        st.rerun()
+                    else:
+                        st.session_state["err_msg_scanner"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."
+                        st.rerun()
+            except Exception:
+                pass
+
+    # --- Elenco righe: solo stato e input, la fotocamera NON è più qui dentro ---
     for _, riga in df_righe_picking.iterrows():
         r_id = riga['riga_id']
         gia_prelevato = riga['quantita_prelevata'] > 0 or r_id in st.session_state.righe_confermate_sessione
-        
-        if not gia_prelevato:
-            tutti_completati = False
 
         with st.container(border=True):
             if gia_prelevato:
                 st.write(f"🟢 **[{riga['posizione']}]** — {riga['descrizione']}")
                 st.success(f"Confermato: **{int(riga['quantita_prelevata'] if riga['quantita_prelevata'] > 0 else riga['quantita_richiesta'])}** su {int(riga['quantita_richiesta'])} pz.")
-            else:
+            elif riga_attiva is not None and r_id == riga_attiva['riga_id']:
                 st.error(f"📍 UBICAZIONE: {riga['posizione']}")
                 st.write(f"**Articolo:** {riga['descrizione']} ({riga['brand'] if riga['brand'] else 'Generico'})")
                 st.write(f"📋 Q.tà Richiesta: **{int(riga['quantita_richiesta'])}** pezzi")
                 st.write(f"`Barcode atteso: {riga['barcode']}`")
-                
-                if not active_item_found:
-                    active_item_found = True
-                    
-                    if f"err_msg_{r_id}" in st.session_state and st.session_state[f"err_msg_{r_id}"]:
-                        st.error(st.session_state[f"err_msg_{r_id}"])
-                    
-                    # --- FIX SCHERMO NERO & PERMESSI FOTOCAMERA (KEY FISSA) ---
-                    st.toast("Inizializzazione ottica fotocamera...", icon="📷")
-                    res_scanner = live_barcode_scanner(key="live_scanner_active_item")
-                    
-                    if res_scanner:
-                        try:
-                            data_ricevuta = json.loads(res_scanner)
-                            codice_rilevato = data_ricevuta["barcode"].strip()
-                            timestamp_scan = data_ricevuta["ts"]
-                            
-                            if st.session_state.get(f"last_processed_ts_{r_id}") != timestamp_scan:
-                                st.session_state[f"last_processed_ts_{r_id}"] = timestamp_scan
-                                
-                                if codice_rilevato == riga['barcode'].strip():
-                                    st.session_state[f"err_msg_{r_id}"] = None
-                                    qty_effettiva = st.session_state.get(f"qty_p_{r_id}", int(riga['quantita_richiesta']))
-                                    
-                                    with conn.session as session:
-                                        session.execute(
-                                            text("UPDATE ordini_righe SET quantita_prelevata = :q WHERE id = :id;"),
-                                            params={"q": qty_effettiva, "id": r_id}
-                                        )
-                                        session.execute(
-                                            text("UPDATE prodotti SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) WHERE id = :id;"),
-                                            params={"q": qty_effettiva, "id": riga['prodotto_id']}
-                                        )
-                                        session.commit()
-                                    
-                                    st.session_state.righe_confermate_sessione.add(r_id)
-                                    st.toast(f"Ubicazione {riga['posizione']} prelevata correttamente!", icon="✅")
-                                    st.rerun()
-                                else:
-                                    #st.session_state[f"err_msg_{r_id}"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."
-                                    st.toast(f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale.")
-                                    st.rerun()
-                        except Exception as e:
-                            pass
 
-                    qty_prelevata = st.number_input(
-                        "Quantità effettiva trovata a scaffale",
-                        min_value=0,
-                        max_value=int(riga['quantita_richiesta']),
-                        value=int(riga['quantita_richiesta']),
-                        step=1,
-                        key=f"qty_p_{r_id}"
-                    )
-                    
-                    if qty_prelevata < riga['quantita_richiesta']:
-                        st.warning("⚠️ Nota: Stai dichiarando un prelievo parziale. La quantità mancante verrà annullata.")
-                        
-                    bc_manuale = st.text_input("Fallback: Inserimento Manuale", key=f"manual_fallback_{r_id}", placeholder="Digita se la fotocamera ha difficoltà...")
-                    if bc_manuale.strip() == riga['barcode'].strip():
-                        if st.button("💾 Forza Conferma Manuale", key=f"btn_manual_{r_id}", type="primary", use_container_width=True):
-                            with conn.session as session:
-                                session.execute(
-                                    text("UPDATE ordini_righe SET quantita_prelevata = :q WHERE id = :id;"),
-                                    params={"q": qty_prelevata, "id": r_id}
-                                )
-                                session.execute(
-                                    text("UPDATE prodotti SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) WHERE id = :id;"),
-                                    params={"q": qty_prelevata, "id": riga['prodotto_id']}
-                                )
-                                session.commit()
-                            st.session_state.righe_confermate_sessione.add(r_id)
-                            st.rerun()
-                else:
-                    st.info("⏳ In attesa del completamento dell'articolo precedente nella mappa di percorso.")
+                if st.session_state.get("err_msg_scanner"):
+                    st.error(st.session_state["err_msg_scanner"])
+
+                qty_prelevata = st.number_input(
+                    "Quantità effettiva trovata a scaffale",
+                    min_value=0,
+                    max_value=int(riga['quantita_richiesta']),
+                    value=int(riga['quantita_richiesta']),
+                    step=1,
+                    key=f"qty_p_{r_id}"
+                )
+
+                if qty_prelevata < riga['quantita_richiesta']:
+                    st.warning("⚠️ Nota: Stai dichiarando un prelievo parziale. La quantità mancante verrà annullata.")
+
+                bc_manuale = st.text_input("Fallback: Inserimento Manuale", key=f"manual_fallback_{r_id}", placeholder="Digita se la fotocamera ha difficoltà...")
+                if bc_manuale.strip() == riga['barcode'].strip():
+                    if st.button("💾 Forza Conferma Manuale", key=f"btn_manual_{r_id}", type="primary", use_container_width=True):
+                        with conn.session as session:
+                            session.execute(
+                                text("UPDATE ordini_righe SET quantita_prelevata = :q WHERE id = :id;"),
+                                params={"q": qty_prelevata, "id": r_id}
+                            )
+                            session.execute(
+                                text("UPDATE prodotti SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) WHERE id = :id;"),
+                                params={"q": qty_prelevata, "id": riga['prodotto_id']}
+                            )
+                            session.commit()
+                        st.session_state.righe_confermate_sessione.add(r_id)
+                        st.rerun()
+            else:
+                st.info("⏳ In attesa del completamento dell'articolo precedente nella mappa di percorso.")
 
     ## ====================================================
     ## FASE 3: CHIUSURA DEFINITIVA DEL PICKING + INSERIMENTO COLLI

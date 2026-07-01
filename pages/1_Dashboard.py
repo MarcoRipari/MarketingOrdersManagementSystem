@@ -5,7 +5,7 @@ from sqlalchemy import text
 st.set_page_config(page_title="SGLM - Dashboard Direzionale", layout="wide")
 conn = st.connection("postgresql", type="sql")
 
-st.title("📊 Modulo F — Pannello di Controllo Direzionale")
+st.title("📊 Dashboard")
 
 # -------------------------------------------------------------------------
 # RECUPERO DATI METRICHE (KPI)

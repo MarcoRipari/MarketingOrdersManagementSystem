@@ -163,7 +163,7 @@ else:
                 st.error(f"📍 UBICAZIONE: {riga['posizione']}")
                 st.write(f"**Articolo:** {riga['descrizione']} ({riga['brand'] if riga['brand'] else 'Generico'})")
                 st.write(f"📋 Q.tà Richiesta: **{int(riga['quantita_richiesta'])}** pezzi")
-                st.code(f"Barcode atteso: {riga['barcode']}", language="markdown")
+                st.write(f"`Barcode atteso: {riga['barcode']}`")
                 
                 if not active_item_found:
                     active_item_found = True
@@ -171,8 +171,9 @@ else:
                     if f"err_msg_{r_id}" in st.session_state and st.session_state[f"err_msg_{r_id}"]:
                         st.error(st.session_state[f"err_msg_{r_id}"])
                     
-                    # RENDER DEL NUOVO CUSTOM COMPONENT BIDIREZIONALE
-                    res_scanner = live_barcode_scanner(key=f"custom_camera_feed_{r_id}")
+                    # --- FIX SCHERMO NERO & PERMESSI FOTOCAMERA (KEY FISSA) ---
+                    st.toast("Inizializzazione ottica fotocamera...", icon="📷")
+                    res_scanner = live_barcode_scanner(key="live_scanner_active_item")
                     
                     if res_scanner:
                         try:
@@ -199,7 +200,7 @@ else:
                                         session.commit()
                                     
                                     st.session_state.righe_confermate_sessione.add(r_id)
-                                    st.toast(f"Ubicazione {riga['posizione']} prelevata!", icon="✅")
+                                    st.toast(f"Ubicazione {riga['posizione']} prelevata correttamente!", icon="✅")
                                     st.rerun()
                                 else:
                                     st.session_state[f"err_msg_{r_id}"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."

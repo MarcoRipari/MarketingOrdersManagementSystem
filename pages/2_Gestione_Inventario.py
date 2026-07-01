@@ -118,7 +118,7 @@ if ruolo_utente == "Operatore (Magazzino)":
                 new_desc = st.text_input("Descrizione Prodotto *")
                 new_brand = st.text_input("Brand (Opzionale)")
             with col2:
-                new_stagione = st.selectbox("Stagione (Opzionale)", [None, "SS", "FW"])
+                new_stagione = st.selectbox("Stagione (Opzionale)", ["", "PE", "AI"])
                 # CORREZIONE: value=None permette al campo numerico di essere svuotato/lasciato in bianco
                 new_anno = st.number_input("Anno (Opzionale)", min_value=2020, max_value=2035, value=None, step=1)
                 new_pos = st.text_input("Posizione a Scaffale (es. A-01-B) *")

@@ -95,8 +95,8 @@ else:
             
             # Box con anagrafica di spedizione per confronto visivo con etichettatrice
             with st.container(border=True):
-                st.markdown(f"**Destinatario:** {ordine_dettaglio['cliente_nome']}")
                 st.markdown(f"**Codici:** `CLI: {ordine_dettaglio['codice_cliente']}` | `DEST: {ordine_dettaglio['codice_destinazione']}`")
+                st.markdown(f"**Destinatario:** {ordine_dettaglio['cliente_nome']}")
                 st.markdown(f"**Indirizzo:** {ordine_dettaglio['indirizzo']}")
                 st.markdown(f"**Località:** {ordine_dettaglio['cap']} - {ordine_dettaglio['citta']} ({ordine_dettaglio['nazione']})")
                 st.caption(f"Picking ultimato il: {ordine_dettaglio['data_picking'].strftime('%d/%m/%Y %H:%M')}")

@@ -3,6 +3,7 @@ import pandas as pd
 from sqlalchemy import text
 import streamlit.components.v1 as components
 import json
+import os
 
 # Configurazione ottimizzata per mobile/desktop di magazzino
 st.set_page_config(page_title="SGLM - Picking Mobile", layout="centered")
@@ -11,6 +12,74 @@ st.set_page_config(page_title="SGLM - Picking Mobile", layout="centered")
 conn = st.connection("postgresql", type="sql")
 
 st.title("📱 Modulo C — Picking Mobile")
+
+## ====================================================
+## INIZIALIZZAZIONE COMPONENTE BIDIREZIONALE CAMERA
+## ====================================================
+@st.cache_resource
+def inizializza_componente_scanner():
+    """Crea dinamicamente i file necessari per il componente bidirezionale"""
+    cartella_componente = "scanner_ottico_local"
+    if not os.path.exists(cartella_componente):
+        os.makedirs(cartella_componente)
+    
+    html_custom = """<!DOCTYPE html>
+    <html>
+    <head>
+        <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
+        <style>
+            body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; background-color: transparent; }
+            .scanner-window { position: relative; width: 100%; max-width: 400px; border-radius: 12px; overflow: hidden; border: 3px solid #ff4b4b; background-color: #000; }
+            video { width: 100%; height: auto; display: block; }
+            .laser-line { position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: #ff0000; box-shadow: 0 0 8px #ff0000; animation: target 2.5s infinite ease-in-out; }
+            @keyframes target { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
+        </style>
+    </head>
+    <body>
+        <div class="scanner-window">
+            <video id="webcam_feed" autoplay playsinline muted></video>
+            <div class="laser-line"></div>
+        </div>
+        <script>
+            // Funzione nativa per rispedire il dato a Streamlit in modo sicuro
+            function inviaDatoAPython(valore) {
+                window.parent.postMessage({
+                    type: 'streamlit:setComponentValue',
+                    value: valore
+                }, '*');
+            }
+
+            // Handshake iniziale obbligatorio per i Custom Components
+            window.parent.postMessage({type: 'streamlit:componentReady', version: 1}, '*');
+
+            window.addEventListener("message", (event) => {
+                if (event.data.type === "streamlit:render") {
+                    // Componente pronto e renderizzato dalla UI parent
+                }
+            });
+
+            const codeReader = new ZXing.BrowserMultiFormatReader();
+            const constraints = { video: { facingMode: "environment" } };
+
+            codeReader.decodeFromConstraints(constraints, 'webcam_feed', (result, err) => {
+                if (result) {
+                    // Stringa JSON pulita catturata dal flusso video live
+                    inviaDatoAPython(JSON.stringify({ barcode: result.text, ts: Date.now() }));
+                    codeReader.reset();
+                }
+            });
+        </script>
+    </body>
+    </html>"""
+    
+    with open(os.path.join(cartella_componente, "index.html"), "w", encoding="utf-8") as f:
+        f.write(html_custom)
+        
+    return components.declare_component("live_barcode_scanner", path=cartella_componente)
+
+# Registrazione del lettore ottico reale
+live_barcode_scanner = inizializza_componente_scanner()
+
 
 ## ----------------------------------------------------
 ## INIZIALIZZAZIONE SESSION STATE PER L'ORDINE IN CORSO
@@ -29,7 +98,6 @@ if st.session_state.ordine_in_picking_id is None:
     st.subheader("📋 Ordini Pendenti in attesa di Picking")
     
     try:
-        # Recupera solo gli ordini in stato 'Nuovo'
         query_nuovi = """
             SELECT t.id, t.numero_ordine, c.nome as cliente_nome, t.data_creazione,
                    (SELECT COUNT(*) FROM ordini_righe WHERE ordine_id = t.id) as totale_righe
@@ -49,18 +117,15 @@ if st.session_state.ordine_in_picking_id is None:
         st.write("Seleziona un ordine per iniziare il percorso di prelievo guidato:")
         
         for _, row in df_nuovi.iterrows():
-            # Card compatta per visualizzazione da smartphone
             with st.container(border=True):
                 st.write(f"📦 **Ordine N° {row['numero_ordine']}**")
                 st.write(f"**Destinatario:** {row['cliente_nome']}")
                 st.write(f"🔢 Articoli diversi da prelevare: {row['totale_righe']}")
                 st.caption(f"Ricevuto il: {row['data_creazione'].strftime('%d/%m/%Y %H:%M')}")
                 
-                # Bottone di presa in carico con gestione atomica della concorrenza
                 if st.button(f"⚡ Inizia Picking N° {row['numero_ordine']}", key=f"btn_take_{row['id']}", use_container_width=True):
                     try:
                         with conn.session as session:
-                            # QUERY ATOMICA (§5.3 PRD): Aggiorna solo se lo stato è ancora 'Nuovo'
                             res = session.execute(
                                 text("""
                                     UPDATE ordini_testata
@@ -92,7 +157,6 @@ else:
     id_ordine_attivo = st.session_state.ordine_in_picking_id
     
     try:
-        # Recupera i dati di testata dell'ordine corrente
         ordine_info = conn.query("""
             SELECT t.numero_ordine, c.nome as cliente_nome, t.note
             FROM ordini_testata t
@@ -104,13 +168,11 @@ else:
         st.session_state.ordine_in_picking_id = None
         st.stop()
 
-    # Intestazione fissa del Picking
     st.subheader(f"⚡ Picking in Corso: Ordine N° {ordine_info['numero_ordine']}")
     st.write(f"👤 **Destinatario:** {ordine_info['cliente_nome']}")
     if ordine_info['note']:
         st.info(f"📝 **Note Richiedente:** {ordine_info['note']}")
         
-    # Bottone di rilascio d'emergenza
     if st.button("↩️ Rilascia Ordine (Torna indietro)", use_container_width=True):
         try:
             with conn.session as session:
@@ -121,7 +183,7 @@ else:
                 session.commit()
             st.session_state.ordine_in_picking_id = None
             st.session_state.righe_confermate_sessione = set()
-            st.toast("Ordine rilasciato e tornato disponibile per altri operatori.")
+            st.toast("Ordine rilasciato e tornato disponibile.")
             st.rerun()
         except Exception as e:
             st.error(f"Errore durante il rilascio dell'ordine: {e}")
@@ -129,7 +191,6 @@ else:
     st.divider()
 
     try:
-        # RECUPERO RIGHE ORDINATE ALFABETICAMENTE PER POSIZIONE (§4 PRD)
         query_righe = """
             SELECT r.id as riga_id, p.id as prodotto_id, p.barcode, p.brand, p.descrizione, p.posizione,
                    r.quantita_richiesta, r.quantita_prelevata
@@ -146,106 +207,52 @@ else:
     st.write("##### 🗺️ Mappa del percorso di prelievo:")
     
     tutti_completati = True
-    active_item_found = False  # Flag per attivare lo scanner solo sulla riga corrente
+    active_item_found = False
     
     for _, riga in df_righe_picking.iterrows():
         r_id = riga['riga_id']
-        
-        # Consideriamo completata la riga se salvata in questa sessione o se ha già un prelievo registrato a DB
         gia_prelevato = riga['quantita_prelevata'] > 0 or r_id in st.session_state.righe_confermate_sessione
         
         if not gia_prelevato:
             tutti_completati = False
 
-        # Generazione UI condizionale basata sullo stato del prelievo della riga
         with st.container(border=True):
             if gia_prelevato:
-                # Riga Evasa: Visualizzazione contratta/pulita per non intasare lo schermo mobile
                 st.write(f"🟢 **[{riga['posizione']}]** — {riga['descrizione']}")
                 st.success(f"Confermato: **{int(riga['quantita_prelevata'] if riga['quantita_prelevata'] > 0 else riga['quantita_richiesta'])}** su {int(riga['quantita_richiesta'])} pz.")
             else:
-                # Riga da Evare: Evidenziazione forte dell'ubicazione fisica a scaffale
                 st.error(f"📍 UBICAZIONE: {riga['posizione']}")
                 st.write(f"**Articolo:** {riga['descrizione']} ({riga['brand'] if riga['brand'] else 'Generico'})")
                 st.write(f"📋 Q.tà Richiesta: **{int(riga['quantita_richiesta'])}** pezzi")
                 st.code(f"Barcode atteso: {riga['barcode']}", language="markdown")
                 
-                # Sblocca il flusso video dello scanner SOLO per l'articolo attivo corrente
                 if not active_item_found:
                     active_item_found = True
                     
-                    # Mostra errore di scansione precedente se esistente
                     if f"err_msg_{r_id}" in st.session_state and st.session_state[f"err_msg_{r_id}"]:
                         st.error(st.session_state[f"err_msg_{r_id}"])
                     
-                    # --- COMPONENTE INTERNO DI SCANNING REAL-TIME (ZXing HTML5 Video) ---
-                    html_scanner = """
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
-                        <style>
-                            body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; background-color: transparent; }
-                            .scanner-window { position: relative; width: 100%; max-width: 400px; border-radius: 12px; overflow: hidden; border: 3px solid #ff4b4b; background-color: #000; }
-                            video { width: 100%; height: auto; display: block; }
-                            .laser-line { position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: #ff0000; box-shadow: 0 0 8px #ff0000; animation: target 2.5s infinite ease-in-out; }
-                            @keyframes target { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="scanner-window">
-                            <video id="webcam_feed" autoplay playsinline muted></video>
-                            <div class="laser-line"></div>
-                        </div>
-                        <script>
-                            const codeReader = new ZXing.BrowserMultiFormatReader();
-                            
-                            // Vincolo per forzare la fotocamera posteriore dello smartphone
-                            const constraints = { video: { facingMode: "environment" } };
-
-                            codeReader.decodeFromConstraints(constraints, 'webcam_feed', (result, err) => {
-                                if (result) {
-                                    // Invia una stringa JSON contenente il testo e il timestamp per evitare cache e loop su Streamlit
-                                    window.parent.postMessage({
-                                        type: 'streamlit:setComponentValue',
-                                        value: JSON.stringify({ barcode: result.text, ts: Date.now() })
-                                    }, '*');
-                                    codeReader.reset();
-                                }
-                            });
-                        </script>
-                    </body>
-                    </html>
-                    """
+                    # RENDER DEL NUOVO CUSTOM COMPONENT BIDIREZIONALE (Ritorna dati reali a Python!)
+                    res_scanner = live_barcode_scanner(key=f"custom_camera_feed_{r_id}")
                     
-                    # Rendering dell'iframe della fotocamera
-                    res_scanner = components.html(html_scanner, height=250, scrolling=False, key=f"camera_feed_{r_id}")
-                    
-                    # Intercettazione dati inviati da JavaScript
                     if res_scanner:
                         try:
                             data_ricevuta = json.loads(res_scanner)
                             codice_rilevato = data_ricevuta["barcode"].strip()
                             timestamp_scan = data_ricevuta["ts"]
                             
-                            # Verifica atomica per elaborare lo scan una sola volta per singolo evento
                             if st.session_state.get(f"last_processed_ts_{r_id}") != timestamp_scan:
                                 st.session_state[f"last_processed_ts_{r_id}"] = timestamp_scan
                                 
                                 if codice_rilevato == riga['barcode'].strip():
-                                    st.session_state[f"err_msg_{r_id}"] = None  # Resetta errori
-                                    
-                                    # Quantità da prelevare presa dal selettore grafico
+                                    st.session_state[f"err_msg_{r_id}"] = None
                                     qty_effettiva = st.session_state.get(f"qty_p_{r_id}", int(riga['quantita_richiesta']))
                                     
-                                    # --- SALVATAGGIO TRANSAZIONALE IMMEDIATO AUTOMATICO ---
                                     with conn.session as session:
-                                        # 1. Aggiorna riga ordine
                                         session.execute(
                                             text("UPDATE ordini_righe SET quantita_prelevata = :q WHERE id = :id;"),
                                             params={"q": qty_effettiva, "id": r_id}
                                         )
-                                        # 2. Aggiorna giacenza anagrafica
                                         session.execute(
                                             text("UPDATE prodotti SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) WHERE id = :id;"),
                                             params={"q": qty_effettiva, "id": riga['prodotto_id']}
@@ -256,13 +263,11 @@ else:
                                     st.toast(f"Ubicazione {riga['posizione']} prelevata!", icon="✅")
                                     st.rerun()
                                 else:
-                                    # Memorizza il messaggio d'errore senza bloccare lo script
                                     st.session_state[f"err_msg_{r_id}"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."
                                     st.rerun()
                         except Exception as e:
                             pass
 
-                    # Input quantità: configurabile prima o dopo lo scan (se mancano pezzi)
                     qty_prelevata = st.number_input(
                         "Quantità effettiva trovata a scaffale",
                         min_value=0,
@@ -273,9 +278,8 @@ else:
                     )
                     
                     if qty_prelevata < riga['quantita_richiesta']:
-                        st.warning("⚠️ Nota: Stai dichiarando un prelievo parziale. La quantità mancante verrà annullata definitivamente.")
+                        st.warning("⚠️ Nota: Stai dichiarando un prelievo parziale. La quantità mancante verrà annullata.")
                         
-                    # Fallback Manuale di Sicurezza (In caso di etichette rovinate o problemi di riflesso della luce)
                     bc_manuale = st.text_input("Fallback: Inserimento Manuale", key=f"manual_fallback_{r_id}", placeholder="Digita se la fotocamera ha difficoltà...")
                     if bc_manuale.strip() == riga['barcode'].strip():
                         if st.button("💾 Forza Conferma Manuale", key=f"btn_manual_{r_id}", type="primary", use_container_width=True):
@@ -292,30 +296,27 @@ else:
                             st.session_state.righe_confermate_sessione.add(r_id)
                             st.rerun()
                 else:
-                    # Blocca visivamente le righe successive per non generare confusione o conflitti hardware fotocamera
                     st.info("⏳ In attesa del completamento dell'articolo precedente nella mappa di percorso.")
 
-    # ====================================================
-    # FASE 3: CHIUSURA DEFINITIVA DEL PICKING
-    # ====================================================
+    ## ====================================================
+    ## FASE 3: CHIUSURA DEFINITIVA DEL PICKING
+    ## ====================================================
     st.divider()
     st.subheader("🏁 Fine Prelievo")
     
     if tutti_completati:
         st.success("👍 Tutte le righe di questo ordine sono state elaborate.")
     else:
-        st.warning("⚠️ Attenzione: Ci sono ancora righe non verificate. Puoi comunque chiudere il picking, ma le righe non salvate verranno considerate a zero pezzi.")
+        st.warning("⚠️ Attenzione: Ci sono ancora righe non verificate.")
 
     if st.button("🏁 Chiudi Picking e Invia all'Imballo", type="primary", use_container_width=True):
         try:
-            # Recuperiamo lo stato aggiornato delle righe per calcolare se l'ordine è 'evaso_parziale'
             df_controllo_finale = conn.query(
                 "SELECT quantita_richiesta, quantita_prelevata FROM ordini_righe WHERE ordine_id = :id", 
                 params={"id": id_ordine_attivo}, 
                 ttl="0"
             )
             
-            # Controllo flag evasione parziale (§5.1 PRD)
             ha_mancanti = any(df_controllo_finale['quantita_prelevata'] < df_controllo_finale['quantita_richiesta'])
             
             with conn.session as session:
@@ -331,8 +332,7 @@ else:
                 )
                 session.commit()
             
-            st.success("🎉 Ordine completato con successo e trasferito al Banco Imballo!")
-            # Reset dello stato per il prossimo picking
+            st.success("🎉 Ordine completato con successo!")
             st.session_state.ordine_in_picking_id = None
             st.session_state.righe_confermate_sessione = set()
             st.rerun()

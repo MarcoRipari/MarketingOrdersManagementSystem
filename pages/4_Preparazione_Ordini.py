@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import text
+import streamlit.components.v1 as components
+import json
 
 # Configurazione ottimizzata per mobile/desktop di magazzino
 st.set_page_config(page_title="SGLM - Picking Mobile", layout="centered")
@@ -144,6 +146,7 @@ else:
     st.write("##### 🗺️ Mappa del percorso di prelievo:")
     
     tutti_completati = True
+    active_item_found = False  # Flag per attivare lo scanner solo sulla riga corrente
     
     for _, riga in df_righe_picking.iterrows():
         r_id = riga['riga_id']
@@ -167,69 +170,130 @@ else:
                 st.write(f"📋 Q.tà Richiesta: **{int(riga['quantita_richiesta'])}** pezzi")
                 st.code(f"Barcode atteso: {riga['barcode']}", language="markdown")
                 
-                # --- FUNZIONE DI AUTO-SUBMIT AL CAMBIO DEL TESTO (OTTIMIZZAZIONE VELOCITÀ) ---
-                # Questa funzione viene attivata IMMEDIATAMENTE quando la tastiera inserisce il codice e preme Invio
-                def esegui_auto_picking(id_riga=r_id, id_prod=riga['prodotto_id'], bc_atteso=riga['barcode'], q_richiesta=riga['quantita_richiesta'], pos=riga['posizione']):
-                    input_utente = st.session_state[f"scan_{id_riga}"].strip()
+                # Sblocca il flusso video dello scanner SOLO per l'articolo attivo corrente
+                if not active_item_found:
+                    active_item_found = True
                     
-                    if input_utente == bc_atteso.strip():
-                        try:
-                            # Se l'operatore ha modificato manualmente la quantità nel campo numerico prima di sparare, usiamo quella.
-                            # Altrimenti, di default, consideriamo l'intero lotto richiesto prelevato con successo.
-                            qty_effettiva = st.session_state.get(f"qty_p_{id_riga}", int(q_richiesta))
+                    # Mostra errore di scansione precedente se esistente
+                    if f"err_msg_{r_id}" in st.session_state and st.session_state[f"err_msg_{r_id}"]:
+                        st.error(st.session_state[f"err_msg_{r_id}"])
+                    
+                    # --- COMPONENTE INTERNO DI SCANNING REAL-TIME (ZXing HTML5 Video) ---
+                    html_scanner = """
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
+                        <style>
+                            body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; background-color: transparent; }
+                            .scanner-window { position: relative; width: 100%; max-width: 400px; border-radius: 12px; overflow: hidden; border: 3px solid #ff4b4b; background-color: #000; }
+                            video { width: 100%; height: auto; display: block; }
+                            .laser-line { position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: #ff0000; box-shadow: 0 0 8px #ff0000; animation: target 2.5s infinite ease-in-out; }
+                            @keyframes target { 0% { top: 20%; } 50% { top: 80%; } 100% { top: 20%; } }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="scanner-window">
+                            <video id="webcam_feed" autoplay playsinline muted></video>
+                            <div class="laser-line"></div>
+                        </div>
+                        <script>
+                            const codeReader = new ZXing.BrowserMultiFormatReader();
                             
+                            // Vincolo per forzare la fotocamera posteriore dello smartphone
+                            const constraints = { video: { facingMode: "environment" } };
+
+                            codeReader.decodeFromConstraints(constraints, 'webcam_feed', (result, err) => {
+                                if (result) {
+                                    // Invia una stringa JSON contenente il testo e il timestamp per evitare cache e loop su Streamlit
+                                    window.parent.postMessage({
+                                        type: 'streamlit:setComponentValue',
+                                        value: JSON.stringify({ barcode: result.text, ts: Date.now() })
+                                    }, '*');
+                                    codeReader.reset();
+                                }
+                            });
+                        </script>
+                    </body>
+                    </html>
+                    """
+                    
+                    # Rendering dell'iframe della fotocamera
+                    res_scanner = components.html(html_scanner, height=250, scrolling=False, key=f"camera_feed_{r_id}")
+                    
+                    # Intercettazione dati inviati da JavaScript
+                    if res_scanner:
+                        try:
+                            data_ricevuta = json.loads(res_scanner)
+                            codice_rilevato = data_ricevuta["barcode"].strip()
+                            timestamp_scan = data_ricevuta["ts"]
+                            
+                            # Verifica atomica per elaborare lo scan una sola volta per singolo evento
+                            if st.session_state.get(f"last_processed_ts_{r_id}") != timestamp_scan:
+                                st.session_state[f"last_processed_ts_{r_id}"] = timestamp_scan
+                                
+                                if codice_rilevato == riga['barcode'].strip():
+                                    st.session_state[f"err_msg_{r_id}"] = None  # Resetta errori
+                                    
+                                    # Quantità da prelevare presa dal selettore grafico
+                                    qty_effettiva = st.session_state.get(f"qty_p_{r_id}", int(riga['quantita_richiesta']))
+                                    
+                                    # --- SALVATAGGIO TRANSAZIONALE IMMEDIATO AUTOMATICO ---
+                                    with conn.session as session:
+                                        # 1. Aggiorna riga ordine
+                                        session.execute(
+                                            text("UPDATE ordini_righe SET quantita_prelevata = :q WHERE id = :id;"),
+                                            params={"q": qty_effettiva, "id": r_id}
+                                        )
+                                        # 2. Aggiorna giacenza anagrafica
+                                        session.execute(
+                                            text("UPDATE prodotti SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) WHERE id = :id;"),
+                                            params={"q": qty_effettiva, "id": riga['prodotto_id']}
+                                        )
+                                        session.commit()
+                                    
+                                    st.session_state.righe_confermate_sessione.add(r_id)
+                                    st.toast(f"Ubicazione {riga['posizione']} prelevata!", icon="✅")
+                                    st.rerun()
+                                else:
+                                    # Memorizza il messaggio d'errore senza bloccare lo script
+                                    st.session_state[f"err_msg_{r_id}"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."
+                                    st.rerun()
+                        except Exception as e:
+                            pass
+
+                    # Input quantità: configurabile prima o dopo lo scan (se mancano pezzi)
+                    qty_prelevata = st.number_input(
+                        "Quantità effettiva trovata a scaffale",
+                        min_value=0,
+                        max_value=int(riga['quantita_richiesta']),
+                        value=int(riga['quantita_richiesta']),
+                        step=1,
+                        key=f"qty_p_{r_id}"
+                    )
+                    
+                    if qty_prelevata < riga['quantita_richiesta']:
+                        st.warning("⚠️ Nota: Stai dichiarando un prelievo parziale. La quantità mancante verrà annullata definitivamente.")
+                        
+                    # Fallback Manuale di Sicurezza (In caso di etichette rovinate o problemi di riflesso della luce)
+                    bc_manuale = st.text_input("Fallback: Inserimento Manuale", key=f"manual_fallback_{r_id}", placeholder="Digita se la fotocamera ha difficoltà...")
+                    if bc_manuale.strip() == riga['barcode'].strip():
+                        if st.button("💾 Forza Conferma Manuale", key=f"btn_manual_{r_id}", type="primary", use_container_width=True):
                             with conn.session as session:
-                                # 1. Aggiorna la riga dell'ordine
                                 session.execute(
                                     text("UPDATE ordini_righe SET quantita_prelevata = :q WHERE id = :id;"),
-                                    params={"q": qty_effettiva, "id": id_riga}
+                                    params={"q": qty_prelevata, "id": r_id}
                                 )
-                                # 2. Decrementa lo stock
                                 session.execute(
                                     text("UPDATE prodotti SET quantita_disponibile = GREATEST(0, quantita_disponibile - :q) WHERE id = :id;"),
-                                    params={"q": qty_effettiva, "id": id_prod}
+                                    params={"q": qty_prelevata, "id": riga['prodotto_id']}
                                 )
                                 session.commit()
-                            
-                            st.session_state.righe_confermate_sessione.add(id_riga)
-                            st.toast(f"🎯 UBICAZIONE {pos} EVASA CON SUCCESSO!", icon="✅")
-                        except Exception as e:
-                            st.error(f"Errore nel salvataggio automatico: {e}")
-                    elif input_utente != "":
-                        st.toast(f"❌ Barcode Errato per l'ubicazione {pos}!", icon="🚨")
-
-                # Input Barcode con callback ad attivazione immediata
-                bc_input = st.text_input(
-                    "Scansiona Barcode per Sbloccare", 
-                    key=f"scan_{r_id}", 
-                    placeholder="Spara il codice qui...",
-                    on_change=esegui_auto_picking,
-                    help="Usa la tastiera-fotocamera. Se il codice è corretto, la riga si salva da sola!"
-                )
-                
-                # Validazione formale visiva (se l'operatore scrive senza premere subito invio)
-                barcode_valido = (bc_input.strip() == riga['barcode'].strip())
-                
-                if bc_input and not barcode_valido:
-                    st.error("❌ Barcode errato! Controlla di aver preso l'articolo corretto.")
-                
-                # Input quantità: visibile come opzione/fallback o per gestire le anomalie (es. giacenza parziale)
-                qty_prelevata = st.number_input(
-                    "Quantità effettiva trovata a scaffale",
-                    min_value=0,
-                    max_value=int(riga['quantita_richiesta']),
-                    value=int(riga['quantita_richiesta']),
-                    step=1,
-                    key=f"qty_p_{r_id}"
-                )
-                
-                if barcode_valido and qty_prelevata < riga['quantita_richiesta']:
-                    st.warning("⚠️ Nota: Stai dichiarando un prelievo parziale. La quantità mancante verrà annullata definitivamente.")
-
-                # Il bottone manuale resta come paracadute di sicurezza se l'operatore non usa l'invio automatico
-                if st.button("💾 Conferma Riga Manuale", key=f"btn_save_{r_id}", disabled=not barcode_valido, type="secondary", use_container_width=True):
-                    esegui_auto_picking()
-                    st.rerun()
+                            st.session_state.righe_confermate_sessione.add(r_id)
+                            st.rerun()
+                else:
+                    # Blocca visivamente le righe successive per non generare confusione o conflitti hardware fotocamera
+                    st.info("⏳ In attesa del completamento dell'articolo precedente nella mappa di percorso.")
 
     # ====================================================
     # FASE 3: CHIUSURA DEFINITIVA DEL PICKING

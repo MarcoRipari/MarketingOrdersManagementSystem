@@ -198,6 +198,7 @@ with tab_modifica:
         id_ordine_target = opzioni_ordini[ordine_selezionato_id]
         
         if id_ordine_target:
+            # 1. Recupera le righe attuali dell'ordine selezionato
             query_righe = """
                 SELECT r.id as riga_id, p.id as prodotto_id, p.barcode, p.descrizione, r.quantita_richiesta, p.quantita_disponibile
                 FROM ordini_righe r
@@ -206,12 +207,24 @@ with tab_modifica:
             """
             df_righe_target = conn.query(query_righe, params={"ordine_id": id_ordine_target}, ttl="0")
             
-            st.write("#### Righe dell'ordine:")
+            # 2. Recupera l'elenco di tutti i prodotti in magazzino per consentire la nuova aggiunta
+            try:
+                df_prodotti_all = conn.query("SELECT id, barcode, descrizione, brand, quantita_disponibile, posizione FROM prodotti WHERE quantita_disponibile > 0 ORDER BY descrizione;", ttl="0")
+            except Exception as e:
+                st.error("Errore nel caricamento del catalogo prodotti per l'aggiunta.")
+                df_prodotti_all = pd.DataFrame()
+
+            # Filtra il catalogo escludendo i prodotti che l'ordine contiene già
+            prodotti_gia_presenti = df_righe_target['prodotto_id'].tolist() if not df_righe_target.empty else []
+            df_prodotti_filtrati = df_prodotti_all[~df_prodotti_all['id'].isin(prodotti_gia_presenti)] if not df_prodotti_all.empty else pd.DataFrame()
+            
+            st.write("#### Righe attuali dell'ordine:")
             
             with st.form("form_modifica_ordine"):
                 cambiamenti = {}
                 cancellazioni = []
                 
+                # Rendering delle righe già esistenti
                 for _, riga in df_righe_target.iterrows():
                     col_b, col_d, col_q, col_del = st.columns([2, 4, 2, 1])
                     col_b.write(f"`{riga['barcode']}`")
@@ -232,22 +245,57 @@ with tab_modifica:
                         cancellazioni.append(riga['riga_id'])
                     elif nuova_qty != riga['quantita_richiesta']:
                         cambiamenti[riga['riga_id']] = nuova_qty
-                        
+                
                 st.write("⚠️ *Nota: Se elimini tutte le righe, l'ordine rimarrà vuoto.*")
                 
-                btn_salva_modifiche = st.form_submit_button("Salva Modifiche Ordine", type="primary")
+                # ----------------------------------------------------
+                # NUOVA SEZIONE: AGGIUNTA ARTICOLO EXTRA
+                # ----------------------------------------------------
+                st.divider()
+                st.write("➕ **Aggiungi un nuovo articolo a questo ordine:**")
+                
+                opzioni_nuovo_p = {"-- Seleziona un articolo da aggiungere (Opzionale) --": None}
+                if not df_prodotti_filtrati.empty:
+                    for _, row in df_prodotti_filtrati.iterrows():
+                        opzioni_nuovo_p[f"[{row['barcode']}] {row['descrizione']} (Disponibili: {row['quantita_disponibile']} in {row['posizione']})"] = row
+                
+                col_np, col_nq = st.columns([6, 3])
+                nuovo_p_testo = col_np.selectbox("Scegli l'articolo extra", list(opzioni_nuovo_p.keys()), key=f"new_p_{id_ordine_target}")
+                nuovo_p_row = opzioni_nuovo_p[nuovo_p_testo]
+                
+                # Mostra la quantità abilitata solo se viene selezionato un prodotto valido
+                max_q_extra = int(nuovo_p_row['quantita_disponibile']) if nuovo_p_row is not None else 1
+                nuova_p_qty = col_nq.number_input("Quantità extra", min_value=1, max_value=max_q_extra, value=1, step=1, key=f"new_q_{id_ordine_target}", disabled=(nuovo_p_row is None))
+                
+                st.write("")
+                btn_salva_modifiche = st.form_submit_button("Salva Modifiche Ordine (Applica tutto)", type="primary")
                 
                 if btn_salva_modifiche:
                     try:
                         with conn.session as session:
-                            # 1. Cancellazioni (con text())
+                            # 1. Processa le cancellazioni delle righe esistenti
                             for riga_id in cancellazioni:
                                 session.execute(text("DELETE FROM ordini_righe WHERE id = :id"), params={"id": riga_id})
-                            # 2. Aggiornamenti (con text())
+                            
+                            # 2. Processa le modifiche di quantità delle righe esistenti
                             for riga_id, qta in cambiamenti.items():
                                 session.execute(text("UPDATE ordini_righe SET quantita_richiesta = :qta WHERE id = :id"), params={"qta": qta, "id": riga_id})
+                            
+                            # 3. Inserisce il nuovo articolo extra (se selezionato)
+                            if nuovo_p_row is not None:
+                                session.execute(
+                                    text("""
+                                    INSERT INTO ordini_righe (ordine_id, prodotto_id, quantita_richiesta)
+                                    VALUES (:ordine_id, :prodotto_id, :qty);
+                                    """),
+                                    params={
+                                        "ordine_id": id_ordine_target,
+                                        "prodotto_id": nuovo_p_row["id"],
+                                        "qty": nuova_p_qty
+                                    }
+                                )
                             session.commit()
-                        st.success("Ordine aggiornato con successo!")
+                        st.success("Ordine aggiornato con successo (modifiche apportate ed eventuale articolo extra aggiunto)!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Errore durante l'aggiornamento dell'ordine: {e}")

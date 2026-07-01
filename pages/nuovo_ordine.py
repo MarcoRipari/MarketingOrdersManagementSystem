@@ -128,25 +128,23 @@ with tab_crea:
         
         st.divider()
         st.subheader("Fase 3 — Informazioni di Invio")
-        richiedente_email = st.text_input("Tua Email Ufficio Marketing *", placeholder="nome.cognome@falc.biz")
         note_ordine = st.text_area("Note aggiuntive per l'ordine (opzionali)", placeholder="Es. Consegnare tassativamente")
         
         if st.button("🚀 Invia Ordine Definitivo al Magazzino", type="primary"):
             if not cliente_id:
                 st.error("Seleziona un cliente valido nella Fase 1.")
-            elif not richiedente_email or "@" not in richiedente_email:
-                st.error("Inserisci un indirizzo email aziendale valido per procedere.")
             else:
                 try:
                     with conn.session as session:
                         # 1. Inserisce la testata dell'ordine (con text())
                         res = session.execute(
                             text("""
-                            INSERT INTO ordini_testata (cliente_id, richiedente_email, note, stato)
+                            INSERT INTO ordini_testata (cliente_id, note, stato)
                             VALUES (:cliente_id, :email, :note, 'Nuovo')
                             RETURNING id;
                             """),
-                            params={"cliente_id": cliente_id, "email": richiedente_email, "note": note_ordine if note_ordine else None}
+                            params={"cliente_id": cliente_id
+                                    , "note": note_ordine if note_ordine else None}
                         )
                         ordine_id_nuovo = res.fetchone()[0]
                         
@@ -178,7 +176,7 @@ with tab_modifica:
     
     try:
         query_ordini = """
-            SELECT t.id, t.numero_ordine, c.nome as cliente_nome, t.richiedente_email, t.data_creazione
+            SELECT t.id, t.numero_ordine, c.nome as cliente_nome, t.data_creazione
             FROM ordini_testata t
             JOIN clienti c ON t.cliente_id = c.id
             WHERE t.stato = 'Nuovo'

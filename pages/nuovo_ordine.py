@@ -122,7 +122,8 @@ with tab_crea:
         st.warning("Non ci sono prodotti con giacenza disponibile nel magazzino in questo momento.")
     else:
         col_p, col_q, col_b = st.columns([5, 2, 2])
-        
+
+        df_prodotti = df_prodotti.sort_values(by=['brand'])
         opzioni_prodotti = {}
         for _, row in df_prodotti.iterrows():
             opzioni_prodotti[f"{row['brand']} - {row['descrizione']} (Disponibili: {row['quantita_disponibile']})"] = row

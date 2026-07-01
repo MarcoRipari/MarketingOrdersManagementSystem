@@ -307,7 +307,7 @@ with tab_modifica:
                 for _, riga in df_righe_target.iterrows():
                     col_b, col_c, col_d, col_q, col_del = st.columns([2, 2, 2, 2, 1])
                     col_b.write(f"`{riga['barcode']}`")
-                    col_c.write(riga)
+                    col_c.write(riga['brand'])
                     col_d.write(riga['descrizione'])
                     
                     max_consentito = int(riga['quantita_disponibile'] + riga['quantita_richiesta'])
@@ -330,7 +330,7 @@ with tab_modifica:
                 st.divider()
                 st.write("➕ **Aggiungi un nuovo articolo a questo ordine:**")
 
-                df_prodotti_filtrati = df_prodotti_filtrati.sort(by=['brand'])
+                df_prodotti_filtrati = df_prodotti_filtrati.sort_values(by=['brand'])
                 opzioni_nuovo_p = {"-- Seleziona un articolo da aggiungere (Opzionale) --": None}
                 if not df_prodotti_filtrati.empty:
                     for _, row in df_prodotti_filtrati.iterrows():

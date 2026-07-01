@@ -203,7 +203,8 @@ else:
                                     st.toast(f"Ubicazione {riga['posizione']} prelevata correttamente!", icon="✅")
                                     st.rerun()
                                 else:
-                                    st.session_state[f"err_msg_{r_id}"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."
+                                    #st.session_state[f"err_msg_{r_id}"] = f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale."
+                                    st.toast(f"❌ Barcode errato ({codice_rilevato})! Controlla il prodotto a scaffale.")
                                     st.rerun()
                         except Exception as e:
                             pass

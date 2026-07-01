@@ -33,7 +33,7 @@ if st.session_state.ordine_in_picking_id is None:
     
     try:
         query_nuovi = """
-            SELECT t.id, t.numero_ordine, c.nome as cliente_nome, (t.data_creazione AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Rome'),
+            SELECT t.id, t.numero_ordine, c.nome as cliente_nome, t.data_creazione,
                    (SELECT COUNT(*) FROM ordini_righe WHERE ordine_id = t.id) as totale_righe
             FROM ordini_testata t
             JOIN clienti c ON t.cliente_id = c.id

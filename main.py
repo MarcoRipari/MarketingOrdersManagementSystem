@@ -24,5 +24,10 @@ pg = st.navigation([
     storico_spedizioni_page
 ])
 
+pg = st.navigation({
+    "Analisi & Controllo": [dashboard_page, inventario_page, storico_spedizioni_page],
+    "Operatività Magazzino": [inserimento_ordini_page, preparazione_ordini_page, chiusura_ordini_page]
+})
+
 # 4. Avvio dell'applicazione
 pg.run()

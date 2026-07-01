@@ -19,7 +19,8 @@ try:
                COALESCE(c.codice_cliente, '0000000') as codice_cliente, 
                COALESCE(c.codice_destinazione, '000') as codice_destinazione,
                c.indirizzo, c.citta, c.cap, c.nazione,
-               t.note, t.evaso_parziale, t.data_aggiornamento as data_picking
+               t.note, t.evaso_parziale, t.data_aggiornamento as data_picking,
+               t.numero_colli  -- <-- AGGIUNTO per agganciare il dato inserito al picking
         FROM ordini_testata t
         JOIN clienti c ON t.cliente_id = c.id
         WHERE t.stato = 'Pronto Spedizione'
@@ -50,6 +51,18 @@ else:
         # Estraiamo i dettagli dell'ordine selezionato
         ordine_dettaglio = df_pronti[df_pronti['id'] == id_ordine_target].iloc[0]
         
+        # --- STRUTTURA STATO PER INTERCETTARE E VALIDARE I COLLI ---
+        key_colli_confermati = f"colli_confermati_{id_ordine_target}"
+        key_alert_attivo = f"alert_attivo_{id_ordine_target}"
+        key_widget_colli = f"widget_colli_{id_ordine_target}"
+        
+        if key_colli_confermati not in st.session_state:
+            # Default gerarchico: 1. Valore DB -> 2. Valore da pagina picking sessione -> 3. Default a 1
+            db_val = ordine_dettaglio['numero_colli']
+            valore_iniziale = int(db_val) if pd.notna(db_val) else st.session_state.get("colli_temporanei", 1)
+            st.session_state[key_colli_confermati] = valore_iniziale
+            st.session_state[key_alert_attivo] = False
+
         # Layout a due colonne: a sinistra il riepilogo merce, a destra i dati di spedizione
         col_sinistra, col_destra = st.columns([4, 3])
         
@@ -58,7 +71,7 @@ else:
             
             # Visualizzazione alert se l'ordine è stato evaso parzialmente in corsia
             if ordine_dettaglio['evaso_parziale']:
-                st.warning("⚠️ **ATTENZIONE:** Questo ordine contiene prelievi parziali per mancanza di merce a scaffale. Controlla le quantità effettive prelevate.")
+                st.warning("⚠️ **ATTENZIONE:** This order contains partial pickings...")
             
             # Recupero delle righe per il controllo finale del contenuto
             try:
@@ -101,7 +114,7 @@ else:
                 st.markdown(f"**Località:** {ordine_dettaglio['cap']} - {ordine_dettaglio['citta']} ({ordine_dettaglio['nazione']})")
                 st.caption(f"Picking ultimato il: {ordine_dettaglio['data_picking'].strftime('%d/%m/%Y %H:%M')}")
 
-            # --- FORM DI CHIUSURA SPEDIZIONE (CON VINCOLI DA PRD §7) ---
+            # --- FORM DI CHIUSURA SPEDIZIONE ---
             st.markdown("#### 📝 Inserimento Dati Logistici")
             with st.form("form_chiusura_spedizione", clear_on_submit=False):
                 
@@ -114,30 +127,62 @@ else:
                 # Se l'utente seleziona un corriere generico, può specificarlo sotto
                 corriere_specifico = ""
                 if corriere_sel == "Altro":
-                    corriere_specifico = st.text_input("Specifica altro corriere/vettore:", placeholder="Es. Corriere locale, Consegnato a mano...")
+                    corriere_specifico = st.text_input("Specifica altro corriere/vettore:", placeholder="Es. Vettore locale...")
                 
                 col_colli, col_tracking = st.columns([1, 2])
                 with col_colli:
-                    n_colli = st.number_input("Numero Colli *", min_value=1, value=1, step=1)
+                    # FUNZIONE TRIGGER AL CLICK DI + o -
+                    def check_colli_trigger():
+                        st.session_state[key_alert_attivo] = True
+
+                    # Input agganciato alla memoria di stato con controllo callback diretto
+                    n_colli = st.number_input(
+                        "Numero Colli *", 
+                        min_value=1, 
+                        value=st.session_state[key_colli_confermati], 
+                        step=1,
+                        on_change=check_colli_trigger,
+                        key=key_widget_colli
+                    )
                 with col_tracking:
-                    tracking_num = st.text_input("Tracking Number / N° Consegna *", placeholder="Scansiona o digita il codice tracking")
-                    
+                    tracking_num = st.text_input("Tracking Number / N° Consegna *", placeholder="Scansiona tracking")
+                
+                # --- INTERCETTAZIONE ALERT DENTRO IL FORM ---
+                if st.session_state[key_alert_attivo]:
+                    proposta_modifica = st.session_state[key_widget_colli]
+                    if proposta_modifica != st.session_state[key_colli_confermati]:
+                        st.warning(f"⚠️ **CONFERMA:** Modificare i colli da {st.session_state[key_colli_confermati]} a {proposta_modifica}?")
+                        c_yes, c_no = st.columns(2)
+                        with c_yes:
+                            if st.form_submit_button("✅ Conferma"):
+                                st.session_state[key_colli_confermati] = proposta_modifica
+                                st.session_state[key_alert_attivo] = False
+                                st.rerun()
+                        with c_no:
+                            if st.form_submit_button("❌ Annulla"):
+                                st.session_state[key_alert_attivo] = False
+                                # Forza il riallineamento del widget grafico al valore vecchio sicuro
+                                st.session_state[key_widget_colli] = st.session_state[key_colli_confermati]
+                                st.rerun()
+
                 st.write("")
                 btn_spedisci = st.form_submit_button("🚀 Conferma Spedizione e Chiudi Ordine", type="primary", use_container_width=True)
                 
                 if btn_spedisci:
-                    # Definizione del valore definitivo del corriere
-                    vettore_finale = corriere_specifico if corriere_sel == "Ritiro Diretto / Altro" else corriere_sel
+                    vettore_finale = corriere_specifico if corriere_sel == "Altro" else corriere_sel
+                    valore_colli_finale = st.session_state[key_colli_confermati]
                     
                     # Validazione rigorosa dei vincoli del PRD
-                    if corriere_sel == "-- Seleziona un Corriere --" or (corriere_sel == "Ritiro Diretto / Altro" and not corriere_specifico.strip()):
+                    if corriere_sel == "-- Seleziona un Corriere --" or (corriere_sel == "Altro" and not corriere_specifico.strip()):
                         st.error("Scegli o specifica un corriere valido per procedere.")
                     elif not tracking_num.strip():
-                        st.error("Il campo 'Tracking Number' è obbligatorio. Scansiona il codice a barre della lettera di vettura.")
-                    elif n_colli <= 0:
+                        st.error("Il campo 'Tracking Number' è obbligatorio.")
+                    elif valore_colli_finale <= 0:
                         st.error("Il numero di colli deve essere almeno pari a 1.")
+                    elif st.session_state[key_alert_attivo]:
+                        st.error("Conferma o annulla la modifica del numero di colli prima di chiudere la spedizione.")
                     else:
-                        # Esecuzione transazionale del cambio stato
+                        # Esecuzione transazionale del cambio stato utilizzando il valore validato dallo stato
                         try:
                             with conn.session as session:
                                 session.execute(
@@ -152,15 +197,22 @@ else:
                                     """),
                                     params={
                                         "corriere": vettore_finale,
-                                        "colli": n_colli,
+                                        "colli": int(valore_colli_finale), # Valore controllato e salvato
                                         "tracking": tracking_num.strip(),
                                         "id": id_ordine_target
                                     }
                                 )
                                 session.commit()
                             
-                            st.success(f"🎉 Ordine N° {ordine_dettaglio['numero_ordine']} chiuso con successo! Stato impostato su 'Spedito'.")
+                            st.success(f"🎉 Ordine N° {ordine_dettaglio['numero_ordine']} chiuso con successo!")
                             st.balloons()
+                            
+                            # Pulizia delle chiavi di stato temporanee per l'ordine completato
+                            del st.session_state[key_colli_confermati]
+                            del st.session_state[key_alert_attivo]
+                            if "colli_temporanei" in st.session_state:
+                                del st.session_state.colli_temporanei
+                                
                             st.rerun()
                             
                         except Exception as e:

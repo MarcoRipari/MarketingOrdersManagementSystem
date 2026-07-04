@@ -1,0 +1,32 @@
+name: Agente Email Ordini Marketing
+
+on:
+  schedule:
+    # Ogni 15 minuti. GitHub non garantisce l'esecuzione esatta al minuto
+    # sui runner gratuiti: possono esserci alcuni minuti di ritardo nei
+    # momenti di picco, ma per questo caso d'uso non è un problema.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}  # permette anche l'avvio manuale da GitHub
+
+jobs:
+  processa-email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installa dipendenze
+        run: pip install -r email_order_agent/requirements.txt
+
+      - name: Esegui l'agente
+        working-directory: email_order_agent
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python main.py

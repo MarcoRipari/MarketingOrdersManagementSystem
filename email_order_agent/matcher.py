@@ -34,6 +34,15 @@ def risolvi_cliente(session, dati_cliente: dict) -> RisultatoCliente:
     cod_dest = (dati_cliente.get("codice_destinazione") or "").strip()
     nome = (dati_cliente.get("nome") or "").strip()
 
+    # Il resto dell'app richiede esattamente 7 cifre per il codice cliente e 3 per
+    # quello di destinazione. Se l'AI ha estratto qualcosa di diverso (spazi,
+    # trattini, lunghezza sbagliata) scartiamo il valore invece di rischiare un
+    # errore del database o un match sul codice sbagliato.
+    if cod_cli and not (cod_cli.isdigit() and len(cod_cli) == 7):
+        cod_cli = ""
+    if cod_dest and not (cod_dest.isdigit() and len(cod_dest) == 3):
+        cod_dest = ""
+
     # 1. Match esatto per codice cliente + destinazione (massima affidabilità)
     if cod_cli and cod_dest:
         riga = session.execute(
@@ -57,9 +66,10 @@ def risolvi_cliente(session, dati_cliente: dict) -> RisultatoCliente:
 
     # 3. Nessun match affidabile: crea un nuovo cliente con i dati disponibili,
     #    ma segnala bassa confidenza (potrebbe essere un duplicato mal scritto).
-    #    NB: 'indirizzo', 'citta' e 'cap' sono NOT NULL su questa tabella e 'cap'
-    #    è un varchar(10): usiamo un placeholder corto per essere compatibili
-    #    con qualunque colonna, invece di un testo descrittivo lungo.
+    #    NB: 'indirizzo', 'citta' e 'cap' sono NOT NULL su questa tabella; i limiti
+    #    di lunghezza qui sotto rispecchiano esattamente lo schema reale
+    #    (nome varchar(255), indirizzo TEXT senza limite, citta varchar(100),
+    #    cap varchar(10), nazione varchar(100)).
     PLACEHOLDER = "N/D"
     res = session.execute(
         text("""
@@ -68,11 +78,11 @@ def risolvi_cliente(session, dati_cliente: dict) -> RisultatoCliente:
         RETURNING id;
         """),
         {
-            "nome": (nome or "DA COMPLETARE (creato da email)")[:100],
-            "ind": (dati_cliente.get("indirizzo") or PLACEHOLDER)[:100],
-            "citta": (dati_cliente.get("citta") or PLACEHOLDER)[:50],
+            "nome": (nome or "DA COMPLETARE (creato da email)")[:255],
+            "ind": dati_cliente.get("indirizzo") or PLACEHOLDER,  # TEXT: nessun limite
+            "citta": (dati_cliente.get("citta") or PLACEHOLDER)[:100],
             "cap": (dati_cliente.get("cap") or PLACEHOLDER)[:10],
-            "naz": (dati_cliente.get("nazione") or "Italia")[:50],
+            "naz": (dati_cliente.get("nazione") or "Italia")[:100],
             "cod_cli": cod_cli or None,
             "cod_dest": cod_dest or None,
             "note": "Cliente creato automaticamente dall'agente email: verificare indirizzo/citta/cap.",

@@ -14,7 +14,7 @@ from config import Config
 
 @dataclass
 class RisultatoCliente:
-    cliente_id: int | None
+    cliente_id: str | None  # UUID come stringa
     creato_nuovo: bool
     confidenza_bassa: bool
     dettagli: str
@@ -22,7 +22,7 @@ class RisultatoCliente:
 
 @dataclass
 class RigaMatch:
-    prodotto_id: int | None
+    prodotto_id: str | None  # UUID come stringa
     descrizione_originale: str
     quantita: int
     confidenza_bassa: bool
@@ -56,7 +56,11 @@ def risolvi_cliente(session, dati_cliente: dict) -> RisultatoCliente:
                 )
 
     # 3. Nessun match affidabile: crea un nuovo cliente con i dati disponibili,
-    #    ma segnala bassa confidenza (potrebbe essere un duplicato mal scritto)
+    #    ma segnala bassa confidenza (potrebbe essere un duplicato mal scritto).
+    #    NB: 'indirizzo', 'citta' e 'cap' sono NOT NULL su questa tabella: se l'email
+    #    non li conteneva, usiamo un placeholder esplicito da completare a mano,
+    #    invece di far fallire l'inserimento.
+    PLACEHOLDER = "DA COMPLETARE (email)"
     res = session.execute(
         text("""
         INSERT INTO clienti (nome, indirizzo, citta, cap, nazione, codice_cliente, codice_destinazione, note)
@@ -65,13 +69,13 @@ def risolvi_cliente(session, dati_cliente: dict) -> RisultatoCliente:
         """),
         {
             "nome": nome or "DA COMPLETARE (creato da email)",
-            "ind": dati_cliente.get("indirizzo"),
-            "citta": dati_cliente.get("citta"),
-            "cap": dati_cliente.get("cap"),
+            "ind": dati_cliente.get("indirizzo") or PLACEHOLDER,
+            "citta": dati_cliente.get("citta") or PLACEHOLDER,
+            "cap": dati_cliente.get("cap") or PLACEHOLDER,
             "naz": dati_cliente.get("nazione") or "Italia",
             "cod_cli": cod_cli or None,
             "cod_dest": cod_dest or None,
-            "note": "Cliente creato automaticamente dall'agente email: verificare i dati.",
+            "note": "Cliente creato automaticamente dall'agente email: verificare indirizzo/citta/cap.",
         },
     )
     nuovo_id = res.fetchone()[0]

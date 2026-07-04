@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import text  # Importato text per compatibilità SQLAlchemy 2.0
 
-st.set_page_config(page_title="SGLM - Nuovo Ordine Marketing", layout="wide")
+#st.set_page_config(page_title="SGLM - Nuovo Ordine Marketing", layout="wide")
 
 # Inizializzazione della connessione SQL
 conn = st.connection("postgresql", type="sql")

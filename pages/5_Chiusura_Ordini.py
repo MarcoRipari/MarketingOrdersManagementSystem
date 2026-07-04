@@ -3,7 +3,7 @@ import pandas as pd
 from sqlalchemy import text
 
 # Configurazione Desktop per il banco imballo
-st.set_page_config(page_title="SGLM - Banco Imballo & Spedizione", layout="wide")
+#st.set_page_config(page_title="SGLM - Banco Imballo & Spedizione", layout="wide")
 
 # Inizializzazione della connessione SQL
 conn = st.connection("postgresql", type="sql")

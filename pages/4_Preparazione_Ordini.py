@@ -8,7 +8,7 @@ import os
 from utils_scanner import live_barcode_scanner
 
 # Configurazione ottimizzata per mobile/desktop di magazzino
-st.set_page_config(page_title="SGLM - Picking Mobile", layout="centered")
+#st.set_page_config(page_title="SGLM - Picking Mobile", layout="centered")
 
 # Inizializzazione della connessione SQL (Supabase Pooler via porta 6543)
 conn = st.connection("postgresql", type="sql")

@@ -57,10 +57,10 @@ def risolvi_cliente(session, dati_cliente: dict) -> RisultatoCliente:
 
     # 3. Nessun match affidabile: crea un nuovo cliente con i dati disponibili,
     #    ma segnala bassa confidenza (potrebbe essere un duplicato mal scritto).
-    #    NB: 'indirizzo', 'citta' e 'cap' sono NOT NULL su questa tabella: se l'email
-    #    non li conteneva, usiamo un placeholder esplicito da completare a mano,
-    #    invece di far fallire l'inserimento.
-    PLACEHOLDER = "DA COMPLETARE (email)"
+    #    NB: 'indirizzo', 'citta' e 'cap' sono NOT NULL su questa tabella e 'cap'
+    #    è un varchar(10): usiamo un placeholder corto per essere compatibili
+    #    con qualunque colonna, invece di un testo descrittivo lungo.
+    PLACEHOLDER = "N/D"
     res = session.execute(
         text("""
         INSERT INTO clienti (nome, indirizzo, citta, cap, nazione, codice_cliente, codice_destinazione, note)
@@ -68,11 +68,11 @@ def risolvi_cliente(session, dati_cliente: dict) -> RisultatoCliente:
         RETURNING id;
         """),
         {
-            "nome": nome or "DA COMPLETARE (creato da email)",
-            "ind": dati_cliente.get("indirizzo") or PLACEHOLDER,
-            "citta": dati_cliente.get("citta") or PLACEHOLDER,
-            "cap": dati_cliente.get("cap") or PLACEHOLDER,
-            "naz": dati_cliente.get("nazione") or "Italia",
+            "nome": (nome or "DA COMPLETARE (creato da email)")[:100],
+            "ind": (dati_cliente.get("indirizzo") or PLACEHOLDER)[:100],
+            "citta": (dati_cliente.get("citta") or PLACEHOLDER)[:50],
+            "cap": (dati_cliente.get("cap") or PLACEHOLDER)[:10],
+            "naz": (dati_cliente.get("nazione") or "Italia")[:50],
             "cod_cli": cod_cli or None,
             "cod_dest": cod_dest or None,
             "note": "Cliente creato automaticamente dall'agente email: verificare indirizzo/citta/cap.",

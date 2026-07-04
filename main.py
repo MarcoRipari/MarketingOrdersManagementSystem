@@ -1,7 +1,7 @@
 import streamlit as st
 
 # 1. Configurazione globale (impostata una sola volta per tutta l'app)
-st.set_page_config(page_title="SGLM - Gestione Logistica", layout="wide")
+st.set_page_config(page_title="Marketing Orders Management System", layout="wide")
 
 # 2. Definizione di tutte le pagine del workflow (percorso file, titolo e icona)
 # 'default=True' assicura che l'utente atterri direttamente sulla Dashboard

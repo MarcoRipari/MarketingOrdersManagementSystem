@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import text
 
-st.set_page_config(page_title="SGLM - Dashboard Direzionale", layout="wide")
+#st.set_page_config(page_title="SGLM - Dashboard Direzionale", layout="wide")
 conn = st.connection("postgresql", type="sql")
 
 st.title("📊 Dashboard")

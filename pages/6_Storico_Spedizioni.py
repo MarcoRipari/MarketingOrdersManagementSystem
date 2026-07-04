@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 
 # Configurazione della pagina (Layout Wide per analisi dati e storico)
-st.set_page_config(page_title="SGLM - Storico Spedizioni & Tracking", layout="wide")
+#st.set_page_config(page_title="SGLM - Storico Spedizioni & Tracking", layout="wide")
 
 # Connessione al database
 conn = st.connection("postgresql", type="sql")
